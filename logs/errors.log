@@ -1,0 +1,227 @@
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "send_telegram_message" to job store "default"
+INFO:apscheduler.scheduler:Removed job 4984bd3d42574726a79e368da263d2f9
+INFO:apscheduler.executors.default:Running job "send_telegram_message (trigger: date[2025-07-17 12:14:00 IST], next run at: 2025-07-17 12:14:00 IST)" (scheduled at 2025-07-17 12:14:00+05:30)
+INFO:telethon.network.mtprotosender:Connecting to 91.108.56.136:443/TcpFull...
+INFO:telethon.network.mtprotosender:Connection to 91.108.56.136:443/TcpFull complete!
+INFO:telethon.client.uploads:Uploading file of 442177 bytes in 4 chunks of 131072
+INFO:apscheduler.executors.default:Job "send_telegram_message (trigger: date[2025-07-17 12:14:00 IST], next run at: 2025-07-17 12:14:00 IST)" executed successfully
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930329, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930469, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469813, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469825, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469805, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469809, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469817, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469829, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469837, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930153, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930169, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930137, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930141, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930157, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930133, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469781, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469833, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469797, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930201, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469821, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469777, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469789, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469793, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469801, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469769, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469765, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469773, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469761, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644580469785, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930285, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930205, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930521, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930545, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930473, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930349, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930517, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930309, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930381, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930445, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930433, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930361, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930333, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930325, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930465, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940644579930549, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940685782680585, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940685782680577, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940685782477873, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940685782477861, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+WARNING:telethon.network.mtprotostate:Server sent a very old message with ID 7527940685782680581, ignoring (see FAQ for details)
+WARNING:telethon.network.mtprotosender:Security error while unpacking a received message: Too many messages had to be ignored consecutively
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for account updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+WARNING:telethon.client.users:Telegram is having internal issues PersistentTimestampOutdatedError: Persistent timestamp outdated (caused by GetChannelDifferenceRequest)
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for account updates
+WARNING:telethon.client.users:Telegram is having internal issues PersistentTimestampOutdatedError: Persistent timestamp outdated (caused by GetChannelDifferenceRequest)
+WARNING:telethon.client.users:Telegram is having internal issues PersistentTimestampOutdatedError: Persistent timestamp outdated (caused by GetChannelDifferenceRequest)
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates
+INFO:telethon.client.updates:Got difference for channel 1978890981 updates
+INFO:telethon.client.updates:Got difference for channel 1679609061 updates
+INFO:telethon.client.updates:Got difference for channel 1423451813 updates
+INFO:telethon.client.updates:Got difference for channel 1645060791 updates

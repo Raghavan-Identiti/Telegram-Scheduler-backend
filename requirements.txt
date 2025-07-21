@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+python-multipart
+telethon
+pandas
+openpyxl
+python-dotenv
+apscheduler

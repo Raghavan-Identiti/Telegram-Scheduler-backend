@@ -31,7 +31,7 @@ app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 # Frontend Mount (conditionally if out/ exists)
 frontend_path = os.path.join(os.path.dirname(__file__), "out")
 if os.path.exists(frontend_path):
-    app.mount("/app", StaticFiles(directory=frontend_path, html=True), name="out")
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="out")
 else:
     print("⚠️ out directory 'out' not found. Skipping mount.")
 

@@ -12,6 +12,7 @@ api_id = int(os.getenv("TELEGRAM_API_ID"))
 api_hash = os.getenv("TELEGRAM_API_HASH")
 phone = os.getenv("TELEGRAM_PHONE_NUMBER")
 session_string = os.getenv("TELETHON_SESSION")
+print("TELETHON_SESSION:", os.getenv("TELETHON_SESSION"))
 
 client = TelegramClient(StringSession(session_string), api_id, api_hash)
 

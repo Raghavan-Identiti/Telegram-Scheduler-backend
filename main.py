@@ -33,7 +33,7 @@ frontend_path = os.path.join(os.path.dirname(__file__), "out")
 if os.path.exists(frontend_path):
     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="out")
 else:
-    print("⚠️ Frontend directory 'out' not found. Skipping mount.")
+    print("⚠️ out directory 'out' not found. Skipping mount.")
 
 @app.post("/bulk-schedule")
 async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...), schedule_data: str = Form(...)):

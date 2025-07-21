@@ -25,7 +25,6 @@ app = FastAPI()  # <== All API routes will be prefixed with /api
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-    "http://localhost:3000",
     "https://telegram-scheduler-frontend.vercel.app/"
     ],
     allow_credentials=True,

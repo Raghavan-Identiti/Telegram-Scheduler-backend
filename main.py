@@ -11,15 +11,23 @@ import shutil
 import re
 from datetime import datetime, timedelta
 import json
+from starlette.applications import Starlette
+from starlette.routing import Mount
+from fastapi.middleware.wsgi import WSGIMiddleware
+from starlette.middleware.wsgi import WSGIMiddleware as StarletteWSGIMiddleware
+
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app = FastAPI()
+app = FastAPI()  # <== All API routes will be prefixed with /api
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # use ['https://your-render-url.onrender.com'] in prod
+    allow_origins=[
+    "http://localhost:3000",
+    "https://telegram-scheduler-frontend.vercel.app/"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,13 +35,6 @@ app.add_middleware(
 # Static Mounts
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")
-
-# Frontend Mount (conditionally if out/ exists)
-frontend_path = os.path.join(os.path.dirname(__file__), "out")
-if os.path.exists(frontend_path):
-    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="out")
-else:
-    print("⚠️ out directory 'out' not found. Skipping mount.")
 
 @app.post("/api/bulk-schedule")
 async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...), schedule_data: str = Form(...)):
@@ -107,9 +108,7 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+# Entry point for manual runs
 if __name__ == "__main__":
     import uvicorn
-    import os
-
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -31,7 +31,7 @@ app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 # Frontend Mount (conditionally if out/ exists)
 frontend_path = os.path.join(os.path.dirname(__file__), "out")
 if os.path.exists(frontend_path):
-    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="out")
 else:
     print("⚠️ Frontend directory 'out' not found. Skipping mount.")
 
@@ -107,3 +107,9 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
+if __name__ == "__main__":
+    import uvicorn
+    import os
+
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)

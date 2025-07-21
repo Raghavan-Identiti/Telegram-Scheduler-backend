@@ -35,7 +35,7 @@ if os.path.exists(frontend_path):
 else:
     print("⚠️ out directory 'out' not found. Skipping mount.")
 
-@app.post("/bulk-schedule")
+@app.post("/api/bulk-schedule")
 async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...), schedule_data: str = Form(...)):
     try:
         # Clear previous uploads

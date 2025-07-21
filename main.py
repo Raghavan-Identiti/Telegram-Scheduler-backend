@@ -72,15 +72,20 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
         if not image_files:
             return JSONResponse(status_code=400, content={"error": "No image files matched 'postX'"})
 
-        # Collect all unique post numbers from both images and .txt files
-        all_post_nums = set(image_files.keys())
+       # Extract post numbers from both image filenames and text files
+        image_post_nums = set(image_files.keys())
+
+        text_post_nums = set()
         txt_content = ""
         for path in text_paths:
             with open(path, 'r', encoding='utf-8') as f:
                 txt_content += f.read()
 
         matches = re.findall(r'POST\s*(\d+)\s*CONTENT.*?END OF POST\s*\1', txt_content, flags=re.IGNORECASE | re.DOTALL)
-        all_post_nums.update(int(n) for n in matches)
+        text_post_nums.update(int(n) for n in matches)
+
+        # A post is defined by having either image or text (or both), but only counted once
+        all_post_nums = image_post_nums.union(text_post_nums)
 
         # Schedule each post with the full context of txt files
         # base_time = datetime.fromisoformat(scheduled_time) if scheduled_time else datetime.now()

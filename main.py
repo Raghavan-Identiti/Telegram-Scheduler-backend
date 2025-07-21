@@ -27,16 +27,8 @@ app.add_middleware(
 # Static Files (logs, uploads)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-# Clean frontend mount
-frontend_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "out"))
-index_file = os.path.join(frontend_path, "index.html")
-
+frontend_path = os.path.join(os.path.dirname(__file__), "out")
 app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
-
-# Optional explicit root
-@app.get("/")
-def serve_root():
-    return FileResponse(index_file)
 
 # Only one log mount
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")

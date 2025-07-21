@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from scheduler import schedule_message
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from utils import extract_post_content
 import os
 from typing import List
@@ -18,11 +19,33 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Your Next.js frontend
+    allow_origins=["*"],  # use ['https://your-render-url.onrender.com'] in prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Static Files (logs, uploads)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/logs", StaticFiles(directory="logs"), name="logs")
+
+# Serve frontend (React build folder)
+# Define the path to the frontend 'out' directory
+frontend_path = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'out')
+frontend_path = os.path.abspath(frontend_path)
+
+print("Serving frontend from:", frontend_path)
+print("Files there:", os.listdir(frontend_path))
+
+# Serve static files (e.g. /_next/static/... etc.)
+app.mount("/_next", StaticFiles(directory=os.path.join(frontend_path, "_next")), name="next")
+app.mount("/static", StaticFiles(directory=frontend_path), name="static")
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    file_path = os.path.join(frontend_path, full_path)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    return FileResponse(os.path.join(frontend_path, "index.html"))
+
 @app.post("/bulk-schedule")
 async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...), schedule_data: str = Form(...)):
     try:

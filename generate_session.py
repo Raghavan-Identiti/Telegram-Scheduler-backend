@@ -1,9 +1,8 @@
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
 
-api_id = int(input("Enter your API ID: "))
-api_hash = input("Enter your API HASH: ")
+api_id = 23623688
+api_hash = 'a97aa6736081b0102f9b7131cb71b2eb'
 
 with TelegramClient(StringSession(), api_id, api_hash) as client:
-    print("Your session string is:")
-    print(client.session.save())
+    print("✅ SESSION STRING:\n", client.session.save())

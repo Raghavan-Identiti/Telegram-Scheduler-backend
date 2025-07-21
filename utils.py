@@ -36,6 +36,10 @@ def extract_post_content(text_paths, post_num):
     return None
 
 async def send_telegram_message(image_path: str, text_paths: list, post_number: int = 1):
+     # Add this block to debug connection issues
+    await client.connect()
+    print("🔌 Connected?", await client.is_user_authorized())
+
     await client.start()
     message = extract_post_content(text_paths, post_number)
 

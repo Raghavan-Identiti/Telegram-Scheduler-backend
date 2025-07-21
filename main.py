@@ -24,15 +24,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# Static Files (logs, uploads)
+# Static Mounts
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-
-frontend_path = os.path.join(os.path.dirname(__file__), "out")
-app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
-
-# Only one log mount
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 
+# Frontend Mount (conditionally if out/ exists)
+frontend_path = os.path.join(os.path.dirname(__file__), "out")
+if os.path.exists(frontend_path):
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+else:
+    print("⚠️ Frontend directory 'out' not found. Skipping mount.")
 
 @app.post("/bulk-schedule")
 async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...), schedule_data: str = Form(...)):
@@ -104,7 +105,5 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
-    
-app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 
 

@@ -32,7 +32,7 @@ def extract_post_content(text_paths, post_num):
 
     return None
 
-async def send_telegram_message(image_path, text_paths, post_number=1):
+async def send_telegram_message(image_path: str, text_paths: list, post_number: int = 1):
     await client.start(phone)
     message = extract_post_content(text_paths, post_number)
 

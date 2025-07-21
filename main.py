@@ -11,11 +11,6 @@ import shutil
 import re
 from datetime import datetime, timedelta
 import json
-from starlette.applications import Starlette
-from starlette.routing import Mount
-from fastapi.middleware.wsgi import WSGIMiddleware
-from starlette.middleware.wsgi import WSGIMiddleware as StarletteWSGIMiddleware
-
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -67,7 +62,9 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
                 match = re.search(r'post(\d+)', name_lower)
                 if match:
                     post_num = int(match.group(1))
-                    image_files[post_num] = file_path
+                else:
+                    post_num = len(image_files) + 1  # fallback index-based order
+                image_files[post_num] = file_path
 
         if not text_paths:
             return JSONResponse(status_code=400, content={"error": "No .txt files provided"})
@@ -106,9 +103,3 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
-
-
-# Entry point for manual runs
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -1,16 +1,15 @@
+# main.py
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from scheduler import schedule_message
 from fastapi.staticfiles import StaticFiles
-from telegram_utils import extract_all_posts_from_texts
-import os
+import os, re, json
 from typing import List
-import re
-from datetime import datetime, timedelta
-import json
+from datetime import datetime, timezone
 from logs_api import router as logs_router
-
+from telegram_utils import extract_all_posts_from_texts, send_telegram_message
+import uuid
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -62,10 +61,7 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
                 text_paths.append(file_path)
             elif name_lower.endswith((".jpg", ".jpeg", ".png")):
                 match = re.search(r'post(\d+)', name_lower)
-                if match:
-                    post_num = int(match.group(1))
-                else:
-                    post_num = len(image_files) + 1  # fallback index-based order
+                post_num = int(match.group(1)) if match else len(image_files) + 1
                 image_files[post_num] = file_path
 
         if not text_paths:
@@ -85,7 +81,6 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
         text_posts = extract_all_posts_from_texts(txt_contents)
         text_post_nums = set(text_posts.keys())
 
-
         # A post is defined by having either image or text (or both), but only counted once
         all_post_nums = image_post_nums.union(text_post_nums)
 
@@ -93,32 +88,38 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
         # base_time = datetime.fromisoformat(scheduled_time) if scheduled_time else datetime.now()
 
         for post_num in sorted(all_post_nums):
-            normalized_keys = {k.lower().replace("_", "").replace("-", ""): v for k, v in post_time_map.items()}
-            post_key = f"post{post_num}jpg"
+            normalized_keys = {
+            re.sub(r'[\W_]', '', k.lower()): v
+            for k, v in post_time_map.items()
+            }
+            post_key_raw = f"post{post_num}.jpg"
+            post_key = re.sub(r'[\W_]', '', post_key_raw.lower())  # removes dots, dashes, underscores
             time_str = normalized_keys.get(post_key)
+            print(f"🔍 Matching key: {post_key} -> time: {time_str}")
             if not time_str:
                 continue  # Skip if no schedule provided
 
             post_data = text_posts.get(post_num, {})
             post_text = post_data.get('text') if isinstance(post_data, dict) else None
             category = post_data.get('category') if isinstance(post_data, dict) else None
-
-            background_tasks.add_task(
-                schedule_message,
-                image_files.get(post_num),
-                post_text,
-                time_str,
-                post_num,
-                category
+            print(f"📌 Scheduling Post {post_num} at {time_str} with image={image_files.get(post_num)}, text={post_text}")
+            schedule_time = datetime.fromisoformat(time_str)
+            await send_telegram_message(
+                image_path=image_files.get(post_num),
+                post_text=post_text,
+                post_number=post_num,
+                category=category,
+                schedule_time=schedule_time
             )
-
 
 
         return JSONResponse({"status": f"{len(all_post_nums)} posts scheduled successfully"})
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
-    
+
+def to_utc_naive(dt: datetime) -> datetime:
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 @app.post("/api/auto-schedule")
 async def auto_schedule(
@@ -130,8 +131,6 @@ async def auto_schedule(
     times: List[str] = Form(default=[]),
     send_image_only: bool = Form(default=False)
 ):
-    import json
-
     # Clear upload directory
     for f in os.listdir(UPLOAD_DIR):
         os.remove(os.path.join(UPLOAD_DIR, f))
@@ -226,13 +225,14 @@ async def auto_schedule(
         }
         preview_posts.append(preview_post)
 
-        background_tasks.add_task(
-            schedule_message,
-            image_path,
-            post_text,
-            time_str,
-            post_num,
-            category
+        local_time = post_times.get(post_num)
+        schedule_time = to_utc_naive(local_time) if local_time else None
+        await send_telegram_message(
+            image_path=image_map.get(post_num),
+            post_text=post_text,
+            post_number=post_num,
+            category=category,
+            schedule_time=schedule_time
         )
 
     return JSONResponse({

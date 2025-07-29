@@ -1,6 +1,7 @@
 import asyncio
 from telethon import TelegramClient
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo  # Python 3.9+
 import os
 from dotenv import load_dotenv
 import logging
@@ -42,46 +43,6 @@ class TelegramScheduler:
             logger.exception("Failed to connect to Telegram.")
             raise
 
-    async def send_message_with_image(self, channel_username, message_text, image_path=None, schedule_date=None):
-        try:
-            await self.connect()
-
-            channel = await self.client.get_entity(channel_username)
-
-            if image_path and os.path.exists(image_path):
-                await self.client.send_file(
-                    entity=channel,
-                    file=image_path,
-                    caption=message_text,
-                    schedule=schedule_date
-                )
-                msg_type = "scheduled" if schedule_date else "sent"
-                logger.info(f"✅ Message with image {msg_type} to {channel_username} at {schedule_date}")
-            else:
-                await self.client.send_message(
-                    entity=channel,
-                    message=message_text,
-                    schedule=schedule_date
-                )
-                msg_type = "scheduled" if schedule_date else "sent"
-                logger.info(f"✅ Text message {msg_type} to {channel_username} at {schedule_date}")
-
-        except FloodWaitError as e:
-            logger.error(f"⏳ Flood wait error: wait for {e.seconds} seconds.")
-        except Exception as e:
-            logger.exception(f"❌ Error sending message: {e}")
-        finally:
-            await self.client.disconnect()
-
-    async def schedule_message(self, channel_username, message_text, image_path=None, schedule_datetime=None):
-        try:
-            if schedule_datetime:
-                await self.send_message_with_image(channel_username, message_text, image_path, schedule_datetime)
-            else:
-                await self.send_message_with_image(channel_username, message_text, image_path)
-        except Exception as e:
-            logger.error(f"❌ Failed to schedule message: {e}")
-
     def create_schedule_datetime(self, date_str=None, time_str=None):
         """
         Returns naive UTC datetime (Telegram expects this format for scheduling).
@@ -95,26 +56,11 @@ class TelegramScheduler:
             time_obj = datetime.strptime(time_str, '%H:%M').time()
 
             # Local time
-            local_dt = datetime.combine(date_obj, time_obj)
-            local_with_tz = local_dt.replace(tzinfo=datetime.now().astimezone().tzinfo)
-            utc_dt = local_with_tz.astimezone(timezone.utc)
+            local_tz = ZoneInfo("Asia/Kolkata")
+            local_dt = datetime.combine(date_obj, time_obj).replace(tzinfo=local_tz)
+            utc_dt = local_dt.astimezone(timezone.utc)
 
             return utc_dt.replace(tzinfo=None)
         except Exception as e:
             logger.error(f"❌ Invalid datetime inputs: date_str={date_str}, time_str={time_str} — {e}")
             raise
-
-# ----------------------------
-# ✅ Example usage helpers
-# ----------------------------
-
-async def send_immediate_message(channel_username, text, image_path=None):
-    scheduler = TelegramScheduler()
-    await scheduler.send_message_with_image(channel_username, text, image_path)
-
-async def schedule_message_for_time(channel_username, text, image_path=None, date_str=None, time_str=None):
-    scheduler = TelegramScheduler()
-    schedule_datetime = scheduler.create_schedule_datetime(date_str, time_str)
-    await scheduler.schedule_message(channel_username, text, image_path, schedule_datetime)
-    return scheduler
-

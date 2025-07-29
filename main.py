@@ -19,7 +19,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://127.0.0.1:3000",
         "https://telegram-scheduler-frontend.vercel.app"
     ],
     allow_credentials=True,
@@ -216,26 +215,41 @@ async def auto_schedule(
         post_text = post_data.get('text') if isinstance(post_data, dict) else post_data
         category = post_data.get('category') if isinstance(post_data, dict) else None
 
+        
+
+        local_time = post_times.get(post_num)
+        schedule_time = to_utc_naive(local_time) if local_time else None
+        try:
+            await send_telegram_message(
+                image_path=image_map.get(post_num),
+                post_text=post_text,
+                post_number=post_num,
+                category=category,
+                schedule_time=schedule_time
+            )
+            status = "scheduled"
+            error = None
+        except Exception as e:
+            print(f"❌ Failed to schedule post {post_num}: {e}")
+            status = "failed"
+            error = str(e)
+        
         preview_post = {
             "post": post_num,
             "image": os.path.basename(image_path) if image_path else None,
             "text": post_text,
             "category": category,
-            "time": time_str.strftime("%H:%M") if isinstance(time_str, datetime) else time_str
+            "time": time_str.strftime("%H:%M") if isinstance(time_str, datetime) else time_str,
+            "status": status,
+            "error": error
         }
         preview_posts.append(preview_post)
-
-        local_time = post_times.get(post_num)
-        schedule_time = to_utc_naive(local_time) if local_time else None
-        await send_telegram_message(
-            image_path=image_map.get(post_num),
-            post_text=post_text,
-            post_number=post_num,
-            category=category,
-            schedule_time=schedule_time
-        )
-
+    scheduled_count = len([p for p in preview_posts if p["status"] == "scheduled"])
+    failed_count = len([p for p in preview_posts if p["status"] == "failed"])
     return JSONResponse({
-        "status": f"Scheduled {len(all_post_nums)} posts between {start_time} and {end_time}",
-        "posts": preview_posts
+        "status": f"Scheduled {scheduled_count} posts between {start_time} and {end_time}, {failed_count} failed",
+        "posts": preview_posts,
+        "scheduled": scheduled_count,
+        "failed": failed_count,
+        "total": len(all_post_nums)
     })

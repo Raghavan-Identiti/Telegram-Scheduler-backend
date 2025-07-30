@@ -180,20 +180,62 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
 
         message = post_text.strip() if post_text else ""
 
-        if media:
+        MAX_CAPTION_LENGTH = 1024
+        MAX_TEXT_LENGTH = 4096
+
+        if media and message:
+            if len(message) <= MAX_CAPTION_LENGTH:
+                # Send image with caption (safe)
+                input_media = InputMediaUploadedPhoto(file=media)
+                await client(SendMediaRequest(
+                    peer=entity,
+                    media=input_media,
+                    message=message,
+                    schedule_date=schedule_time
+                ))
+            else:
+                # Caption too long, send image first without caption
+                input_media = InputMediaUploadedPhoto(file=media)
+                await client(SendMediaRequest(
+                    peer=entity,
+                    media=input_media,
+                    message="",  # no caption
+                    schedule_date=schedule_time
+                ))
+                # Then send the text separately as a message
+                # (Add a small delay to avoid flooding)
+                import asyncio
+                await asyncio.sleep(1)
+                # Truncate text if longer than max allowed
+                chunks = [message[i:i+MAX_TEXT_LENGTH] for i in range(0, len(message), MAX_TEXT_LENGTH)]
+                for chunk in chunks:
+                    await client(SendMessageRequest(
+                        peer=entity,
+                        message=chunk,
+                        schedule_date=schedule_time
+                    ))
+        elif media:
+            # Image only
             input_media = InputMediaUploadedPhoto(file=media)
             await client(SendMediaRequest(
                 peer=entity,
                 media=input_media,
-                message=message,
+                message="",
                 schedule_date=schedule_time
             ))
+        elif message:
+            # Text only
+            chunks = [message[i:i+MAX_TEXT_LENGTH] for i in range(0, len(message), MAX_TEXT_LENGTH)]
+            for chunk in chunks:
+                await client(SendMessageRequest(
+                    peer=entity,
+                    message=chunk,
+                    schedule_date=schedule_time
+                ))
         else:
-            await client(SendMessageRequest(
-                peer=entity,
-                message=message,
-                schedule_date=schedule_time
-            ))
+            # Nothing to send
+            print(f"Nothing to send for post {post_number}")
+
 
         print(f"✅ Scheduled post {post_number} at {schedule_time}")
         log_post_status(post_number, category, "✅ Scheduled", schedule_time)

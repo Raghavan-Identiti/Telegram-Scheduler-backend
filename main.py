@@ -111,7 +111,6 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
                 schedule_time=schedule_time
             )
 
-
         return JSONResponse({"status": f"{len(all_post_nums)} posts scheduled successfully"})
 
     except Exception as e:

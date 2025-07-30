@@ -146,13 +146,21 @@ def split_long_message(message, max_length=4096):
 #     print(f"✅ {status}: Post {post_number}")
 
 
-def log_post_status(post_number, category, status, schedule_time, excel_path='post_logs.xlsx'):
+def log_post_status(post_number, category, status, schedule_time,message, excel_path=None):
     new_log = {
         "Post Number": post_number,
-        "Category": category,
+        # "Category": category,
         "Status": status,
-        "Scheduled Time": schedule_time.strftime("%Y-%m-%d %H:%M:%S")
+        "Scheduled Time": schedule_time.strftime("%Y-%m-%d %H:%M:%S"),
+        'category': category if category else 'Uncategorized',
+        'message': message if message else '',
     }
+
+    os.makedirs("logs", exist_ok=True)
+
+    # Default path if not given
+    if not excel_path:
+        excel_path = os.path.join("logs", "post_logs.xlsx")
 
     if os.path.exists(excel_path):
         df = pd.read_excel(excel_path)
@@ -238,11 +246,10 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
 
 
         print(f"✅ Scheduled post {post_number} at {schedule_time}")
-        log_post_status(post_number, category, "✅ Scheduled", schedule_time)
+        log_post_status(post_number, category, "✅ Scheduled", schedule_time, message)
     except Exception as e:
         print(f"❌ Failed to schedule post {post_number}: {e}")
         log_post_status(post_number, category, f"❌ Failed: {str(e)}", schedule_time)
-
 
 
 def match_image_to_post(post_number: int, image_filenames: list[str]) -> str | None:

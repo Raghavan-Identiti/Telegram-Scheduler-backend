@@ -149,7 +149,6 @@ def split_long_message(message, max_length=4096):
 def log_post_status(post_number, category, status, schedule_time,message, excel_path=None):
     new_log = {
         "Post Number": post_number,
-        # "Category": category,
         "Status": status,
         "Scheduled Time": schedule_time.strftime("%Y-%m-%d %H:%M:%S"),
         'category': category if category else 'Uncategorized',
@@ -186,7 +185,7 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
             with open(image_path, 'rb') as file:
                 media = await client.upload_file(file)
 
-        message = post_text.strip() if post_text else ""
+        message = (post_text or "").strip()  # ensures string
 
         MAX_CAPTION_LENGTH = 1024
         MAX_TEXT_LENGTH = 4096
@@ -249,7 +248,7 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
         log_post_status(post_number, category, "✅ Scheduled", schedule_time, message)
     except Exception as e:
         print(f"❌ Failed to schedule post {post_number}: {e}")
-        log_post_status(post_number, category, f"❌ Failed: {str(e)}", schedule_time)
+        log_post_status(post_number, category, f"❌ Failed: {str(e)}", schedule_time,message)
 
 
 def match_image_to_post(post_number: int, image_filenames: list[str]) -> str | None:

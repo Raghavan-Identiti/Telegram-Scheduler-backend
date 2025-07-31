@@ -1,3 +1,5 @@
+#telegram_scheduler.py
+
 import asyncio
 from telethon import TelegramClient
 from datetime import datetime, timezone
@@ -45,17 +47,18 @@ class TelegramScheduler:
 
     def create_schedule_datetime(self, date_str=None, time_str=None):
         """
-        Returns naive UTC datetime (Telegram expects this format for scheduling).
+        Returns a naive UTC datetime object for Telegram scheduling.
+        Requires both `date_str` and `time_str` (in 24-hour format).
         """
         try:
-            if date_str:
-                date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-            else:
-                date_obj = datetime.now().date()
+            if not date_str or not time_str:
+                raise ValueError("⚠️ Both date and time must be provided.")
 
+            # Parse the date and time
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
             time_obj = datetime.strptime(time_str, '%H:%M').time()
 
-            # Local time
+            # Combine and convert to UTC
             local_tz = ZoneInfo("Asia/Kolkata")
             local_dt = datetime.combine(date_obj, time_obj).replace(tzinfo=local_tz)
             utc_dt = local_dt.astimezone(timezone.utc)

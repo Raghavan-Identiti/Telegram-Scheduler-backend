@@ -3,6 +3,7 @@ AMZ_TELEGRAM
 post-1
 
 category: Kid's Carnival
+DEMO_POST
 
 🔥 **DEMO DEALS OF THE DAY** 🔥
 
@@ -36,6 +37,7 @@ post-1 end
 post-2
 
 category: Daily Essentials
+DEMO_POST
 
 💧 **DEMO Essentials for Skin, Hair & Fragrance** 💧
 
@@ -67,6 +69,7 @@ post-2 end
 post-3
 
 category: Laptops
+DEMO_POST
 
 💻 **DEMO Level Gaming Laptops**
 ⚡️ Up to 45% off

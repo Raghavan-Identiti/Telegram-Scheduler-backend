@@ -32,7 +32,7 @@ def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
 
     # Pattern: post-1 ... post-1 end (any separator: -, _, space)
     post_block_pattern = re.compile(
-        r'post[-_ ]?(\d+)\s*\n(.*?)\npost[-_ ]?\1\s*end',
+        r'post[-_ ]?(\d+)(?:\s?)?\s*\n(.*?)\npost[-_ ]?\1(?:\s+end|\s+copies?)?\s*(?:end)?',
         re.IGNORECASE | re.DOTALL
     )
 
@@ -79,85 +79,22 @@ def split_long_message(message, max_length=4096):
     chunks.append(message)
     return chunks
 
-# async def send_telegram_message(image_path: str, post_text: str, post_number: int = 1, category: str = None, target_channel: str = None,schedule_time: datetime = None):
-#     if not client.is_connected():
-#         await client.connect()
+def log_post_status(post_number, category, status, schedule_time, message, excel_path=None):
+    # Split datetime into date and time components
+    date_str = schedule_time.strftime("%Y-%m-%d")
+    time_str = schedule_time.strftime("%H:%M:%S")
 
-#     if not await client.is_user_authorized():
-#         raise Exception("Telegram client not authorized")
-#         await client.start(phone)
-    
-#     print("🧪 post_text type:", type(post_text))
-#     print("🧪 post_text value:", post_text)
-#     if isinstance(post_text, dict):
-#         message = post_text.get("text", "").strip()
-#     elif isinstance(post_text, str):
-#         message = post_text.strip()
-#     else:
-#         message = ""
-
-#     message = post_text.strip() if post_text else ""
-#     message_parts = split_long_message(message) if message else []
-#     status = ''
-
-#     try:
-#         entity = await client.get_entity(target_channel)
-#         if image_path and message_parts:
-#             caption = message_parts[0][:1024]
-#             await client.send_file(entity, image_path, caption=caption, schedule=schedule_time)
-#             for part in message_parts[1:]:
-#                 await client.send_message(entity, part, schedule=schedule_time)
-#             status = f'Scheduled Image + Text at {schedule_time}'
-
-#         elif image_path and not message_parts:
-#             await client.send_file(entity, image_path, schedule=schedule_time)
-#             status = f'Scheduled Image only at {schedule_time}'
-
-#         elif not image_path and message_parts:
-#             for part in message_parts:
-#                 await client.send_message(entity, part, schedule=schedule_time)
-#             status = f'Scheduled Text only at {schedule_time}'
-
-#         else:
-#             status = f'Nothing to send for post {post_number}'
-
-#     except Exception as e:
-#         status = f'Failed: {str(e)}'
-
-#     log_entry = pd.DataFrame([{
-#         'filename': os.path.basename(image_path) if image_path else 'N/A',
-#         'post_number': post_number,
-#         'category': category if category else 'Uncategorized',
-#         'message': message[:100] if message else '',
-#         'status': status,
-#         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-#     }])
-
-#     os.makedirs("logs", exist_ok=True)
-#     logfile = "logs/messages.xlsx"
-
-#     if os.path.exists(logfile):
-#         existing = pd.read_excel(logfile)
-#         combined = pd.concat([existing, log_entry], ignore_index=True)
-#         combined.to_excel(logfile, index=False)
-#     else:
-#         log_entry.to_excel(logfile, index=False)
-
-#     print(f"✅ {status}: Post {post_number}")
-
-
-def log_post_status(post_number, category, status, schedule_time,message, excel_path=None):
     new_log = {
         "Post Number": post_number,
+        "Category": category if category else 'Uncategorized',
+        "Date": date_str,
+        "Time": time_str,
         "Status": status,
-        "Scheduled Time": schedule_time.strftime("%Y-%m-%d %H:%M:%S"),
-        'category': category if category else 'Uncategorized',
-        'message': message if message else '',
+        "Message": message.strip() if message else '',
     }
 
     os.makedirs("logs", exist_ok=True)
 
-    # Default path if not given
     if not excel_path:
         excel_path = os.path.join("logs", "post_logs.xlsx")
 

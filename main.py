@@ -1,5 +1,5 @@
 # main.py
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Form
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Form, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from scheduler import schedule_message
@@ -121,6 +121,7 @@ def to_utc_naive(dt: datetime) -> datetime:
 
 @app.post("/api/auto-schedule")
 async def auto_schedule(
+    request: Request,
     background_tasks: BackgroundTasks,
     text_files: List[UploadFile] = File([]),
     image_files: List[UploadFile] = File([]),
@@ -180,22 +181,29 @@ async def auto_schedule(
     start_dt = datetime.fromisoformat(start_time)
     end_dt = datetime.fromisoformat(end_time)
 
+    form_data = await request.form()
+    times = form_data.getlist('times[]')  # Get all times[] values
+    print(f"📝 Raw times from form: {times}")
+
     post_times = {}
 
     if times:
+        print(f"📝 Processing custom times: {times}")
         for entry in times:
             if '|' in entry:
-                post_str, time_str = entry.split('|')
+                post_str, time_str = entry.split('|',1)
                 try:
                     post_num = int(post_str.strip())
                     # Combine the user-edited time (e.g., "19:53") with start date
                     full_time = f"{start_dt.date()}T{time_str.strip()}"
                     post_times[post_num] = datetime.fromisoformat(full_time)
+                    print(f"✅ Parsed custom time for post {post_num}: {time_str.strip()} -> {post_times[post_num]}")
                 except Exception as e:
                     print(f"Invalid time format: {entry} - {e}")
                     continue
-    else:
-        # Auto-generate timings if not provided
+    # If no custom times or parsing failed, use auto-generated timings
+    if not post_times:
+        print("🔄 Auto-generating timings...")
         total_posts = len(all_post_nums)
         if total_posts == 1:
             intervals = [start_dt]
@@ -205,19 +213,24 @@ async def auto_schedule(
         for i, post_num in enumerate(all_post_nums):
             post_times[post_num] = intervals[i]
 
+    # Ensure all posts have a time assigned
+    for post_num in all_post_nums:
+        if post_num not in post_times:
+            print(f"⚠️ No time found for post {post_num}, using start time")
+            post_times[post_num] = start_dt
+
     # Create preview and schedule
     preview_posts = []
+    scheduled_count = 0
+    failed_count = 0
     for post_num in all_post_nums:
-        time_str = post_times.get(post_num)
+        scheduled_time = post_times.get(post_num)  # This is a datetime object
         image_path = image_map.get(post_num)
         post_data = text_posts.get(post_num, {})
         post_text = post_data.get('text') if isinstance(post_data, dict) else post_data
         category = post_data.get('category') if isinstance(post_data, dict) else None
 
-        
-
-        local_time = post_times.get(post_num)
-        schedule_time = to_utc_naive(local_time) if local_time else None
+        schedule_time = to_utc_naive(scheduled_time) if scheduled_time else None
         try:
             await send_telegram_message(
                 image_path=image_map.get(post_num),
@@ -228,27 +241,32 @@ async def auto_schedule(
             )
             status = "scheduled"
             error = None
+            scheduled_count += 1
+            print(f"✅ Successfully scheduled post {post_num} at {scheduled_time}")
         except Exception as e:
             print(f"❌ Failed to schedule post {post_num}: {e}")
             status = "failed"
             error = str(e)
+            failed_count += 1
         
         preview_post = {
             "post": post_num,
             "image": os.path.basename(image_path) if image_path else None,
             "text": post_text,
             "category": category,
-            "time": time_str.strftime("%H:%M") if isinstance(time_str, datetime) else time_str,
+            "time": scheduled_time.strftime("%H:%M") if scheduled_time else "N/A",  # Fixed: format datetime properly
             "status": status,
             "error": error
         }
         preview_posts.append(preview_post)
-    scheduled_count = len([p for p in preview_posts if p["status"] == "scheduled"])
-    failed_count = len([p for p in preview_posts if p["status"] == "failed"])
+        total_posts = len(all_post_nums)
+        print(f"✅ Final post count processed: {total_posts} (Scheduled: {scheduled_count}, Failed: {failed_count})")
+
+    print(f"✅ Final post count processed: {total_posts} (Scheduled: {scheduled_count}, Failed: {failed_count})")
     return JSONResponse({
         "status": f"Scheduled {scheduled_count} posts between {start_time} and {end_time}, {failed_count} failed",
         "posts": preview_posts,
         "scheduled": scheduled_count,
         "failed": failed_count,
-        "total": len(all_post_nums)
+        "total": total_posts 
     })

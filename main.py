@@ -6,7 +6,7 @@ from scheduler import schedule_message
 from fastapi.staticfiles import StaticFiles
 import os, re, json
 from typing import List
-from datetime import datetime, timezone
+from datetime import datetime, timezone,timedelta
 from logs_api import router as logs_router
 from telegram_utils import extract_all_posts_from_texts, send_telegram_message
 import uuid
@@ -102,7 +102,7 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
             post_text = post_data.get('text') if isinstance(post_data, dict) else None
             category = post_data.get('category') if isinstance(post_data, dict) else None
             print(f"📌 Scheduling Post {post_num} at {time_str} with image={image_files.get(post_num)}, text={post_text}")
-            schedule_time = datetime.fromisoformat(time_str)
+            schedule_time = round_to_nearest_5(datetime.fromisoformat(time_str))
             await send_telegram_message(
                 image_path=image_files.get(post_num),
                 post_text=post_text,
@@ -118,6 +118,24 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
 
 def to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
+def round_to_nearest_5(dt: datetime) -> datetime:
+    """
+    Rounds time to the nearest 5-minute mark.
+    Examples:
+        10:27 → 10:25
+        10:28 → 10:30
+    """
+    minute = dt.minute
+    remainder = minute % 5
+    if remainder < 3:
+        minute -= remainder
+    else:
+        minute += (5 - remainder)
+    if minute == 60:
+        dt = dt.replace(minute=0) + timedelta(hours=1)
+    else:
+        dt = dt.replace(minute=minute)
+    return dt.replace(second=0, microsecond=0)
 
 @app.post("/api/auto-schedule")
 async def auto_schedule(
@@ -178,8 +196,8 @@ async def auto_schedule(
 
     # Calculate or override timings
     # Parse start and end date-times once
-    start_dt = datetime.fromisoformat(start_time)
-    end_dt = datetime.fromisoformat(end_time)
+    start_dt = round_to_nearest_5(datetime.fromisoformat(start_time))
+    end_dt = round_to_nearest_5(datetime.fromisoformat(end_time))
 
     form_data = await request.form()
     times = form_data.getlist('times[]')  # Get all times[] values
@@ -196,7 +214,7 @@ async def auto_schedule(
                     post_num = int(post_str.strip())
                     # Combine the user-edited time (e.g., "19:53") with start date
                     full_time = f"{start_dt.date()}T{time_str.strip()}"
-                    post_times[post_num] = datetime.fromisoformat(full_time)
+                    post_times[post_num] = round_to_nearest_5(datetime.fromisoformat(full_time))
                     print(f"✅ Parsed custom time for post {post_num}: {time_str.strip()} -> {post_times[post_num]}")
                 except Exception as e:
                     print(f"Invalid time format: {entry} - {e}")
@@ -211,7 +229,7 @@ async def auto_schedule(
             interval = (end_dt - start_dt) / (total_posts - 1)
             intervals = [start_dt + i * interval for i in range(total_posts)]
         for i, post_num in enumerate(all_post_nums):
-            post_times[post_num] = intervals[i]
+            post_times[post_num] = round_to_nearest_5(intervals[i])
 
     # Ensure all posts have a time assigned
     for post_num in all_post_nums:

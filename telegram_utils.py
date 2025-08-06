@@ -4,7 +4,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
-from datetime import datetime
+from datetime import datetime,timezone
 import re
 from typing import Dict, List
 from telegram_scheduler import TelegramScheduler
@@ -15,6 +15,7 @@ from telethon.tl.functions.channels import GetChannelsRequest
 from telethon.tl.types import InputChannel
 from telethon.tl.types import InputPeerUser
 from telethon.tl.functions.messages import UploadMediaRequest
+import pytz
 
 scheduler = TelegramScheduler()
 
@@ -80,9 +81,16 @@ def split_long_message(message, max_length=4096):
     return chunks
 
 def log_post_status(post_number, category, status, schedule_time, message, excel_path=None):
-    # Split datetime into date and time components
-    date_str = schedule_time.strftime("%Y-%m-%d")
-    time_str = schedule_time.strftime("%H:%M:%S")
+    # Convert to Asia/Kolkata (IST)
+    local_tz = pytz.timezone("Asia/Kolkata")
+    if schedule_time.tzinfo is None:
+        # Assume UTC if tz is missing
+        schedule_time = schedule_time.replace(tzinfo=timezone.utc)
+
+    local_time = schedule_time.astimezone(local_tz)
+
+    date_str = local_time.strftime("%Y-%m-%d")
+    time_str = local_time.strftime("%H:%M:%S")
 
     new_log = {
         "Post Number": post_number,
@@ -94,7 +102,6 @@ def log_post_status(post_number, category, status, schedule_time, message, excel
     }
 
     os.makedirs("logs", exist_ok=True)
-
     if not excel_path:
         excel_path = os.path.join("logs", "post_logs.xlsx")
 

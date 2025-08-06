@@ -2,7 +2,6 @@
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Form, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from scheduler import schedule_message
 from fastapi.staticfiles import StaticFiles
 import os, re, json
 from typing import List

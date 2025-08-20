@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo  # Python 3.9+
 import os
 from dotenv import load_dotenv
 import logging
-from telethon.errors import FloodWaitError, SessionPasswordNeededError
+from telethon.errors import SessionPasswordNeededError
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

@@ -11,11 +11,28 @@ from telegram_scheduler import TelegramScheduler
 from datetime import datetime
 from telethon.tl.functions.messages import SendMessageRequest, SendMediaRequest
 from telethon.tl.types import InputPeerChannel, InputMediaUploadedPhoto, InputMediaUploadedDocument
-from telethon.tl.functions.channels import GetChannelsRequest
-from telethon.tl.types import InputChannel
-from telethon.tl.types import InputPeerUser
-from telethon.tl.functions.messages import UploadMediaRequest
+import gspread
+from google.oauth2.service_account import Credentials
 import pytz
+
+# --- Google Sheets Setup ---
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+SERVICE_ACCOUNT_FILE = "E:/Telegram_scheduler_python/backend/gsheets_service_account.json"
+SHEET_ID = "1seb2pGu1XekQmNcHC-6Ma_y9tGRyhTo33PrR8sA-EBc"  # from your sheet URL
+
+try:
+    creds = Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=SCOPES
+    )
+    gc = gspread.authorize(creds)
+    sheet = gc.open_by_key(SHEET_ID).sheet1
+    print("✅ Google Sheets connection successful")
+except FileNotFoundError:
+    print(f"❌ Service account file not found: {SERVICE_ACCOUNT_FILE}")
+except Exception as e:
+    import traceback
+    print(f"❌ Google Sheets setup error: {type(e).__name__}: {e}")
+    traceback.print_exc()
 
 scheduler = TelegramScheduler()
 
@@ -38,6 +55,8 @@ def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
     )
 
     section_start_pattern = re.compile(r'AMZ_TELEGRAM', re.IGNORECASE)
+
+    time_pattern = re.compile(r'^time\s*:\s*(\d{1,2}:\d{2})', re.IGNORECASE)
 
     for text in text_blocks:
         # Start from "AMZ_TELEGRAM" if present
@@ -80,38 +99,77 @@ def split_long_message(message, max_length=4096):
     chunks.append(message)
     return chunks
 
-def log_post_status(post_number, category, status, schedule_time, message, excel_path=None):
-    # Convert to Asia/Kolkata (IST)
+# def log_post_status(post_number, category, status, schedule_time, message, excel_path=None):
+#     # Convert to Asia/Kolkata (IST)
+#     local_tz = pytz.timezone("Asia/Kolkata")
+#     if schedule_time.tzinfo is None:
+#         # Assume UTC if tz is missing
+#         schedule_time = schedule_time.replace(tzinfo=timezone.utc)
+
+#     local_time = schedule_time.astimezone(local_tz)
+
+#     date_str = local_time.strftime("%Y-%m-%d")
+#     time_str = local_time.strftime("%H:%M:%S")
+
+#     new_log = {
+#         "Post Number": post_number,
+#         "Category": category if category else 'Uncategorized',
+#         "Date": date_str,
+#         "Time": time_str,
+#         "Status": status,
+#         "Message": message.strip() if message else '',
+#     }
+
+#     os.makedirs("logs", exist_ok=True)
+#     if not excel_path:
+#         excel_path = os.path.join("logs", "post_logs.xlsx")
+
+#     if os.path.exists(excel_path):
+#         df = pd.read_excel(excel_path)
+#         df = pd.concat([df, pd.DataFrame([new_log])], ignore_index=True)
+#     else:
+#         df = pd.DataFrame([new_log])
+
+#     df.to_excel(excel_path, index=False)
+# Append row using gspread
+def append_row_to_sheet(values):
+    try:
+        sheet.append_row(values)
+    except Exception as e:
+        print(f"Error appending row to sheet: {e}")
+
+def log_post_status_gsheet(post_number, category, status, schedule_time, message):
     local_tz = pytz.timezone("Asia/Kolkata")
     if schedule_time.tzinfo is None:
-        # Assume UTC if tz is missing
         schedule_time = schedule_time.replace(tzinfo=timezone.utc)
 
     local_time = schedule_time.astimezone(local_tz)
-
     date_str = local_time.strftime("%Y-%m-%d")
     time_str = local_time.strftime("%H:%M:%S")
 
-    new_log = {
-        "Post Number": post_number,
-        "Category": category if category else 'Uncategorized',
-        "Date": date_str,
-        "Time": time_str,
-        "Status": status,
-        "Message": message.strip() if message else '',
-    }
+    values = [
+        post_number,
+        category if category else 'Uncategorized',
+        date_str,
+        time_str,
+        status,
+        message.strip() if message else ''
+    ]
 
-    os.makedirs("logs", exist_ok=True)
-    if not excel_path:
-        excel_path = os.path.join("logs", "post_logs.xlsx")
+    append_row_to_sheet(values)
 
-    if os.path.exists(excel_path):
-        df = pd.read_excel(excel_path)
-        df = pd.concat([df, pd.DataFrame([new_log])], ignore_index=True)
-    else:
-        df = pd.DataFrame([new_log])
-
-    df.to_excel(excel_path, index=False)
+def get_blocked_times_from_sheet():
+    """Return a list of datetime objects already scheduled"""
+    blocked = []
+    try:
+        records = sheet.get_all_records()
+        for rec in records:
+            if rec.get("Status", "").lower().startswith("✅"):
+                dt_str = f"{rec['Date']} {rec['Time']}"
+                blocked.append(datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S"))
+    except Exception as e:
+        print(f"Error reading blocked times from sheet: {e}")
+    return blocked
 
 async def send_telegram_message(image_path: str, post_text: str, post_number: int, category: str, schedule_time: datetime):
     if not client.is_connected():
@@ -189,10 +247,10 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
 
 
         print(f"✅ Scheduled post {post_number} at {schedule_time}")
-        log_post_status(post_number, category, "✅ Scheduled", schedule_time, message)
+        log_post_status_gsheet(post_number, category, "✅ Scheduled", schedule_time, message)
     except Exception as e:
         print(f"❌ Failed to schedule post {post_number}: {e}")
-        log_post_status(post_number, category, f"❌ Failed: {str(e)}", schedule_time,message)
+        log_post_status_gsheet(post_number, category, f"❌ Failed: {str(e)}", schedule_time,message)
 
 
 def match_image_to_post(post_number: int, image_filenames: list[str]) -> str | None:

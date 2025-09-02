@@ -1,6 +1,8 @@
 AMZ_TELEGRAM
 
-post-1
+**post-1**
+
+Time :18:00
 
 category: Kid's Carnival
 DEMO_POST
@@ -31,10 +33,114 @@ DEMO_POST
 📣 Sale live from 26th-30th July
 👉🏻 amzaff.in/dvgN1JH
 
-post-1 end
+🔥 **DEMO DEALS OF THE DAY** 🔥
+
+💥 Price Crash Store
+⚡️ Up to 5% off
+👉🏻 amzaff.in/l3swo0g
+
+🌟 Kid's Carnival
+📣 Sale live till 28th July
+👉🏻 amzaff.in/jrtPYsT
+
+🧸 Toy's Fiesta
+⚡️ Up to 70% off
+👉🏻 amzaff.in/pXpqAHe
+
+🪴 Solar Garden & Outdoors
+⚡️ Up to 70% off
+👉🏻 amzaff.in/092HVM2
+
+🛍 End Of Season Sale
+⚡️ Up to 70% off
+👉🏻 amzaff.in/ukuS1wj
+
+🏠 Home Shopping Spree
+📣 Sale live from 26th-30th July
+👉🏻 amzaff.in/dvgN1JH
+
+🔥 **DEMO DEALS OF THE DAY** 🔥
+
+💥 Price Crash Store
+⚡️ Up to 5% off
+👉🏻 amzaff.in/l3swo0g
+
+🌟 Kid's Carnival
+📣 Sale live till 28th July
+👉🏻 amzaff.in/jrtPYsT
+
+🧸 Toy's Fiesta
+⚡️ Up to 70% off
+👉🏻 amzaff.in/pXpqAHe
+
+🪴 Solar Garden & Outdoors
+⚡️ Up to 70% off
+👉🏻 amzaff.in/092HVM2
+
+🛍 End Of Season Sale
+⚡️ Up to 70% off
+👉🏻 amzaff.in/ukuS1wj
+
+🏠 Home Shopping Spree
+📣 Sale live from 26th-30th July
+👉🏻 amzaff.in/dvgN1JH
+
+🔥 **DEMO DEALS OF THE DAY** 🔥
+
+💥 Price Crash Store
+⚡️ Up to 5% off
+👉🏻 amzaff.in/l3swo0g
+
+🌟 Kid's Carnival
+📣 Sale live till 28th July
+👉🏻 amzaff.in/jrtPYsT
+
+🧸 Toy's Fiesta
+⚡️ Up to 70% off
+👉🏻 amzaff.in/pXpqAHe
+
+🪴 Solar Garden & Outdoors
+⚡️ Up to 70% off
+👉🏻 amzaff.in/092HVM2
+
+🛍 End Of Season Sale
+⚡️ Up to 70% off
+👉🏻 amzaff.in/ukuS1wj
+
+🏠 Home Shopping Spree
+📣 Sale live from 26th-30th July
+👉🏻 amzaff.in/dvgN1JH
+
+🔥 **DEMO DEALS OF THE DAY** 🔥
+
+💥 Price Crash Store
+⚡️ Up to 5% off
+👉🏻 amzaff.in/l3swo0g
+
+🌟 Kid's Carnival
+📣 Sale live till 28th July
+👉🏻 amzaff.in/jrtPYsT
+
+🧸 Toy's Fiesta
+⚡️ Up to 70% off
+👉🏻 amzaff.in/pXpqAHe
+
+🪴 Solar Garden & Outdoors
+⚡️ Up to 70% off
+👉🏻 amzaff.in/092HVM2
+
+🛍 End Of Season Sale
+⚡️ Up to 70% off
+👉🏻 amzaff.in/ukuS1wj
+
+🏠 Home Shopping Spree
+📣 Sale live from 26th-30th July
+👉🏻 amzaff.in/dvgN1JH
+
+post-1 end**
 
 
-post-2
+*post-2*
 
 category: Daily Essentials
 DEMO_POST
@@ -66,7 +172,7 @@ DEMO_POST
 post-2 end
 
 
-post-3
+post_3
 
 category: Laptops
 DEMO_POST

@@ -7,8 +7,10 @@ import os, re, json
 from typing import List
 from datetime import datetime, timezone,timedelta
 from logs_api import router as logs_router
-from telegram_utils import extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet
+from telegram_utils import extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet,initialize_google_sheets,sheets_available
 import pandas as pd
+import pytz
+ist = pytz.timezone("Asia/Kolkata")
 
 
 UPLOAD_DIR = "uploads"
@@ -55,21 +57,55 @@ def round_to_nearest_5(dt: datetime) -> datetime:
         dt = dt.replace(minute=minute)
     return dt.replace(second=0, microsecond=0)
 
-def get_blocked_times(log_path="logs/post_logs.xlsx"):
-    blocked_times = []
-    if os.path.exists(log_path):
-        df = pd.read_excel(log_path)
-        for _, row in df.iterrows():
-            if pd.isna(row.get('Date')) or pd.isna(row.get('Time')):
-                continue
+def parse_custom_time(time_str: str, base_date: datetime) -> datetime:
+    """
+    Parse custom time from text file and combine with base date.
+    Supports formats: HH:MM, HH:MM:SS, HH:MM AM/PM
+    """
+    if not time_str:
+        return None
+    
+    time_str = time_str.strip()
+    
+    # Remove AM/PM for now (we'll handle 24-hour format)
+    am_pm = None
+    if time_str.lower().endswith(('am', 'pm')):
+        am_pm = time_str[-2:].lower()
+        time_str = time_str[:-2].strip()
+    
+    try:
+        # Try different time formats
+        time_formats = ["%H:%M:%S", "%H:%M"]
+        time_obj = None
+        
+        for fmt in time_formats:
             try:
-                dt_str = f"{row['Date']} {row['Time']}"
-                dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-                dt = round_to_nearest_5(dt.replace(second=0, microsecond=0))  # 👈 normalize
-                blocked_times.append(dt)
-            except Exception as e:
-                print(f"Skipping invalid log row: {e}")
-    return blocked_times
+                time_obj = datetime.strptime(time_str, fmt).time()
+                break
+            except ValueError:
+                continue
+        
+        if not time_obj:
+            print(f"⚠️ Could not parse time format: {time_str}")
+            return None
+        
+        # Handle AM/PM
+        if am_pm:
+            hour = time_obj.hour
+            if am_pm == 'pm' and hour != 12:
+                hour += 12
+            elif am_pm == 'am' and hour == 12:
+                hour = 0
+            time_obj = time_obj.replace(hour=hour)
+        
+        # Combine with base date
+        result = datetime.combine(base_date.date(), time_obj)
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error parsing custom time '{time_str}': {e}")
+        return None
+
 
 @app.post("/api/auto-schedule")
 async def auto_schedule(
@@ -81,7 +117,9 @@ async def auto_schedule(
     end_time: str = Form(...),
     times: List[str] = Form(default=[]),
     send_image_only: bool = Form(default=False),
-    interval_minutes: int = Form(default=0)  # 0 = Auto distribute
+    interval_minutes: int = Form(default=0),  # 0 = Auto distribute
+    scheduling_mode: str = Form(default="auto")  # auto, manual, text_file, interval
+
 ):
     try:
         # Clear upload directory
@@ -104,6 +142,7 @@ async def auto_schedule(
 
         # Extract posts from text
         text_posts = extract_all_posts_from_texts(text_contents)
+        print(f"📝 Extracted {len(text_posts)} posts from text files")
 
         # Save and process image files
         for file in image_files:
@@ -112,10 +151,12 @@ async def auto_schedule(
             with open(filepath, "wb") as f:
                 f.write(await file.read())
 
-            match = re.search(r'post[-_ ]?0*(\d+)', fname, re.IGNORECASE)
+            match = re.search(r'(?:\*{0,2})\s*post\s*[-_\s]*(\d+)', fname, re.IGNORECASE)
             if match:
                 post_num = int(match.group(1))
                 image_map[post_num] = filepath
+                print(f"🎯 Mapped image {file.filename} to post {post_num}")
+
 
         # Combine all post numbers
         all_post_nums = sorted(set(text_posts.keys()) | set(image_map.keys()))
@@ -131,8 +172,8 @@ async def auto_schedule(
             return JSONResponse(status_code=400, content={"error": "No valid posts detected."})
 
         # Parse start and end date-times
-        start_dt = round_to_nearest_5(datetime.fromisoformat(start_time))
-        end_dt = round_to_nearest_5(datetime.fromisoformat(end_time))
+        start_dt = round_to_nearest_5(ist.localize(datetime.fromisoformat(start_time)))
+        end_dt = round_to_nearest_5(ist.localize(datetime.fromisoformat(end_time)))
 
         # Already-blocked times from logs
         log_blocked_times = set(get_blocked_times_from_sheet())
@@ -161,13 +202,15 @@ async def auto_schedule(
                     try:
                         post_num = int(post_str.strip())
                         full_time = f"{start_dt.date()}T{time_str.strip()}"
-                        dt_time = round_to_nearest_5(datetime.fromisoformat(full_time))
+                        dt_time = ist.localize(round_to_nearest_5(datetime.fromisoformat(full_time)))
 
-                        if dt_time < start_dt or dt_time > end_dt:
+                          # Ensure custom time is on the same date as the selected date
+                        if dt_time.date() != start_dt.date():
                             return JSONResponse(status_code=400, content={
-                                "error": f"Custom time {time_str.strip()} is outside the selected window"
+                                "error": f"Custom time {time_str.strip()} must be on the selected date {start_dt.date()}"
                             })
-                        if dt_time in log_blocked_times:
+                         # Check against blocked times
+                        if any(abs((dt_time - b).total_seconds()) < 60 for b in log_blocked_times):
                             print(f"⚠️ Custom time {time_str.strip()} is blocked, marking as N/A")
                             post_times[post_num] = None
                             continue
@@ -234,6 +277,7 @@ async def auto_schedule(
             post_data = text_posts.get(post_num, {})
             post_text = post_data.get('text') if isinstance(post_data, dict) else post_data
             category = post_data.get('category') if isinstance(post_data, dict) else None
+            custom_time = post_data.get('custom_time') if isinstance(post_data, dict) else None
 
             if not scheduled_time:
                 preview_posts.append({
@@ -241,6 +285,7 @@ async def auto_schedule(
                     "image": os.path.basename(image_path) if image_path else None,
                     "text": post_text,
                     "category": category,
+                    "custom_time": custom_time,
                     "time": "N/A",
                     "status": "skipped",
                     "error": "No available slot within window"
@@ -290,6 +335,28 @@ async def auto_schedule(
         print(f"Error in /api/auto-schedule: {e}")
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
+
+@app.post("/api/sheets/connect-or-check")
+async def connect_or_check(request: Request):
+    global sheets_available
+    body = await request.json()
+    reconnect = body.get("reconnect", False)
+
+    if reconnect or not sheets_available:
+        # Attempt to reconnect
+        success = initialize_google_sheets()
+        sheets_available = success
+        return {
+            "connected": success,
+            "message": "✅ Connected to Google Sheets" if success else "❌ Failed to connect Google Sheets"
+        }
+    else:
+        # Just return current status
+        return {
+            "connected": sheets_available,
+            "message": "✅ Google Sheets connected" if sheets_available else "❌ Google Sheets not connected"
+        }
+        
 @app.get("/api/calendar-slots")
 def get_calendar_slots(date: str = Query(..., description="Format: YYYY-MM-DD")):
     log_file = os.path.join("logs", "post_logs.xlsx")

@@ -4,7 +4,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
-from datetime import datetime,timezone,timedelta
+from datetime import datetime,timezone
 import re
 from typing import Dict, List
 from telegram_scheduler import TelegramScheduler
@@ -16,7 +16,7 @@ from google.oauth2.service_account import Credentials
 import pytz
 
 # --- Google Sheets Setup ---
-SERVICE_ACCOUNT_FILE = os.path.join(os.path.dirname(__file__), "service_account.json")
+SERVICE_ACCOUNT_FILE = "/Users/emp_04/Desktop/Telegram_scheduler_python/Telegram-Scheduler-backend/service_account.json"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", 
           "https://www.googleapis.com/auth/drive"]
 SHEET_ID = "1seb2pGu1XekQmNcHC-6Ma_y9tGRyhTo33PrR8sA-EBc"  # from your sheet URL
@@ -188,6 +188,7 @@ def split_long_message(message, max_length=4096):
     
     return chunks
 
+
 def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
     posts = {}
 
@@ -285,6 +286,19 @@ def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
 
     return posts
 
+def split_long_message(message, max_length=4096):
+    if len(message) <= max_length:
+        return [message]
+
+    chunks = []
+    while len(message) > max_length:
+        split_index = message.rfind("\n", 0, max_length)
+        if split_index == -1:
+            split_index = max_length
+        chunks.append(message[:split_index])
+        message = message[split_index:].lstrip()
+    chunks.append(message)
+    return chunks
 
 def parse_custom_time(time_str: str, base_date: datetime) -> datetime:
     """
@@ -548,51 +562,70 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
 
         message = (post_text or "").strip()  # ensures string
 
-        caption_check = check_caption_length(message)
+                caption_check = check_caption_length(message)
 
-        if media and message:
+
+ if media and message:
             if caption_check["can_use_as_caption"]:
-                # ✅ Caption fits - send with image
+                # Caption fits - send image with caption (traditional method)
                 input_media = InputMediaUploadedPhoto(file=media)
                 await client(SendMediaRequest(
                     peer=entity,
                     media=input_media,
-                    message=caption_check["safe_caption"],  # safe version
+                    message=message,
                     schedule_date=schedule_time
                 ))
                 print(f"✅ Sent image with caption for post {post_number} at {schedule_time}")
-                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image+Caption)", schedule_time, caption_check["safe_caption"])
-            
+                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image+Caption)", schedule_time, message)
+                
             else:
-                # ⚠️ Caption too long - new strategy:
-                # Step 1: Send image with NO caption
+                # Caption too long - use enhanced separation strategy
+                print(f"📏 Caption exceeds limit ({caption_check['length']} chars). Using separation strategy...")
+                
+                # Step 1: Send image first (with short caption if available)
+                short_caption = caption_check["safe_caption"] if caption_check["safe_caption"] else ""
                 input_media = InputMediaUploadedPhoto(file=media)
+                
                 await client(SendMediaRequest(
                     peer=entity,
                     media=input_media,
-                    message="",  # no caption
+                    message=short_caption,
                     schedule_date=schedule_time
                 ))
-                print(f"📸 Sent image only (caption too long) at {schedule_time}")
-
-                # Step 2: Send full text after 1 min
+                print(f"📸 Sent image at {schedule_time} (post {post_number})")
+                
+                # Step 2: Calculate delayed time for text
                 text_schedule_time = calculate_delayed_schedule_time(schedule_time, MESSAGE_DELAY_MINUTES)
-                text_chunks = split_long_message(message, MAX_TEXT_LENGTH)
-
+                
+                # Step 3: Prepare text content
+                remaining_text = caption_check["remaining_text"]
+                if short_caption and remaining_text:
+                    # Combine remaining text with any truncated content
+                    full_text_content = remaining_text
+                else:
+                    full_text_content = message
+                
+                # Step 4: Send text message(s) with delay
+                text_chunks = split_long_message(full_text_content, MAX_TEXT_LENGTH)
+                
                 for i, chunk in enumerate(text_chunks):
+                    # Add additional small delay for multiple chunks
                     chunk_schedule_time = text_schedule_time + timedelta(seconds=i * 30)
+                    
                     await client(SendMessageRequest(
                         peer=entity,
                         message=chunk,
                         schedule_date=chunk_schedule_time
                     ))
-                    print(f"📝 Scheduled text chunk {i+1}/{len(text_chunks)} ({len(chunk)} chars) at {chunk_schedule_time}")
-
-                # Log both separately
-                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image only)", schedule_time, "")
-                log_post_status_gsheet(f"{post_number}-text", category, "✅ Scheduled (Text)", text_schedule_time, message)
-
-  
+                    
+                    print(f"📝 Scheduled text chunk {i+1}/{len(text_chunks)} at {chunk_schedule_time}")
+                
+                print(f"✅ Separated post {post_number}: Image at {schedule_time}, Text at {text_schedule_time}")
+                
+                # Log both parts
+                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image)", schedule_time, short_caption or "Image only")
+                log_post_status_gsheet(f"{post_number}-text", category, "✅ Scheduled (Text)", text_schedule_time, full_text_content)
+                
         elif media:
             # Image only
             input_media = InputMediaUploadedPhoto(file=media)

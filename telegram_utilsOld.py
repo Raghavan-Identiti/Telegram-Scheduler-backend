@@ -4,7 +4,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
-from datetime import datetime,timezone,timedelta
+from datetime import datetime,timezone
 import re
 from typing import Dict, List
 from telegram_scheduler import TelegramScheduler
@@ -16,7 +16,7 @@ from google.oauth2.service_account import Credentials
 import pytz
 
 # --- Google Sheets Setup ---
-SERVICE_ACCOUNT_FILE = os.path.join(os.path.dirname(__file__), "service_account.json")
+SERVICE_ACCOUNT_FILE = "E:/Telegram_scheduler_python/backend/service_account.json"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", 
           "https://www.googleapis.com/auth/drive"]
 SHEET_ID = "1seb2pGu1XekQmNcHC-6Ma_y9tGRyhTo33PrR8sA-EBc"  # from your sheet URL
@@ -24,12 +24,6 @@ SHEET_ID = "1seb2pGu1XekQmNcHC-6Ma_y9tGRyhTo33PrR8sA-EBc"  # from your sheet URL
 # Global variables for sheet connection
 gc = None
 sheet = None
-
-# Enhanced Caption Limits
-MAX_CAPTION_LENGTH = 1024  # Telegram's actual limit
-MAX_TEXT_LENGTH = 4096    # Telegram's message limit
-CAPTION_SAFETY_BUFFER = 50  # Safety buffer for caption length
-MESSAGE_DELAY_MINUTES = 1   # Delay between image and text when separated
 
 def initialize_google_sheets():
     """Initialize Google Sheets connection with proper error handling"""
@@ -79,114 +73,6 @@ phone = os.getenv("TELEGRAM_PHONE_NUMBER")
 session_string = os.getenv("TELETHON_SESSION")
 target_channel = os.getenv("TELEGRAM_TARGET_CHANNEL", "amazonindiaassociates")  # Just username, NOT t.me link
 client = TelegramClient(StringSession(session_string), api_id, api_hash)
-
-
-def check_caption_length(text: str) -> Dict[str, any]:
-    """
-    Enhanced caption length checker with detailed analysis
-    
-    Returns:
-        Dict with keys:
-        - can_use_as_caption: bool
-        - length: int
-        - exceeds_by: int (if exceeds limit)
-        - safe_caption: str (truncated version if needed)
-        - remaining_text: str (text that couldn't fit in caption)
-    """
-    if not text:
-        return {
-            "can_use_as_caption": True,
-            "length": 0,
-            "exceeds_by": 0,
-            "safe_caption": "",
-            "remaining_text": ""
-        }
-    
-    text = text.strip()
-    safe_limit = MAX_CAPTION_LENGTH - CAPTION_SAFETY_BUFFER
-    
-    result = {
-        "can_use_as_caption": len(text) <= safe_limit,
-        "length": len(text),
-        "exceeds_by": max(0, len(text) - safe_limit),
-        "safe_caption": text,
-        "remaining_text": ""
-    }
-    
-    if not result["can_use_as_caption"]:
-        # Find a good break point for truncation
-        truncate_at = safe_limit
-        
-        # Look for natural break points (sentence endings, newlines)
-        for i in range(safe_limit - 100, safe_limit):
-            if i < len(text) and text[i] in '.!?\n':
-                truncate_at = i + 1
-                break
-        
-        # If no good break point, look for spaces
-        if truncate_at == safe_limit:
-            for i in range(safe_limit - 50, safe_limit):
-                if i < len(text) and text[i] == ' ':
-                    truncate_at = i
-                    break
-        
-        result["safe_caption"] = text[:truncate_at].strip()
-        result["remaining_text"] = text[truncate_at:].strip()
-        
-        print(f"⚠️ Caption too long ({len(text)} chars). Split at {truncate_at}: "
-              f"Caption={len(result['safe_caption'])} chars, "
-              f"Remaining={len(result['remaining_text'])} chars")
-    
-    return result
-
-def calculate_delayed_schedule_time(original_time: datetime, delay_minutes: int = MESSAGE_DELAY_MINUTES) -> datetime:
-    """
-    Calculate delayed schedule time for separated text messages
-    
-    Args:
-        original_time: Original scheduled time for the image
-        delay_minutes: Minutes to delay the text message
-    
-    Returns:
-        datetime: New schedule time for text message
-    """
-    return original_time + timedelta(minutes=delay_minutes)
-
-def split_long_message(message, max_length=4096):
-    """Enhanced message splitting with better handling"""
-    if len(message) <= max_length:
-        return [message]
-
-    chunks = []
-    remaining = message
-    
-    while len(remaining) > max_length:
-        # Find the best split point
-        split_index = max_length
-        
-        # Look for natural break points in reverse order
-        for i in range(max_length - 100, max_length):
-            if i < len(remaining):
-                if remaining[i] in '\n\n':  # Paragraph break
-                    split_index = i + 2
-                    break
-                elif remaining[i] in '.!?':  # Sentence end
-                    split_index = i + 1
-                    break
-                elif remaining[i] == '\n':  # Line break
-                    split_index = i + 1
-                    break
-                elif remaining[i] == ' ':  # Word boundary
-                    split_index = i
-                    break
-        
-        chunks.append(remaining[:split_index].strip())
-        remaining = remaining[split_index:].strip()
-    
-    if remaining:
-        chunks.append(remaining)
-    
-    return chunks
 
 def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
     posts = {}
@@ -285,6 +171,19 @@ def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
 
     return posts
 
+def split_long_message(message, max_length=4096):
+    if len(message) <= max_length:
+        return [message]
+
+    chunks = []
+    while len(message) > max_length:
+        split_index = message.rfind("\n", 0, max_length)
+        if split_index == -1:
+            split_index = max_length
+        chunks.append(message[:split_index])
+        message = message[split_index:].lstrip()
+    chunks.append(message)
+    return chunks
 
 def parse_custom_time(time_str: str, base_date: datetime) -> datetime:
     """
@@ -443,6 +342,43 @@ def log_post_status_gsheet(post_number, category, status, schedule_time, message
         # Fallback to local logging
         log_post_status_local_fallback(post_number, category, status, schedule_time, message)
 
+def log_post_status_local_fallback(post_number, category, status, schedule_time, message):
+    """Fallback logging to local Excel file if Google Sheets fails"""
+    try:
+        # Format datetime consistently
+        schedule_time = format_datetime_consistently(schedule_time)
+        
+        # Convert to Asia/Kolkata (IST)
+        local_tz = pytz.timezone("Asia/Kolkata")
+        local_time = schedule_time.astimezone(local_tz)
+        
+        date_str = local_time.strftime("%Y-%m-%d")
+        time_str = local_time.strftime("%H:%M:%S")
+        
+        new_log = {
+            "Post Number": int(post_number) if post_number else 0,
+            "Category": str(category).strip() if category else 'Uncategorized',
+            "Date": date_str,
+            "Time": time_str,
+            "Status": str(status).strip() if status else 'Unknown',
+            "Message": safe_truncate_text(message, 200),
+        }
+
+        os.makedirs("logs", exist_ok=True)
+        excel_path = os.path.join("logs", "post_logs.xlsx")
+
+        if os.path.exists(excel_path):
+            df = pd.read_excel(excel_path)
+            df = pd.concat([df, pd.DataFrame([new_log])], ignore_index=True)
+        else:
+            df = pd.DataFrame([new_log])
+
+        df.to_excel(excel_path, index=False)
+        print(f"📁 Logged to local fallback file: {excel_path}")
+        
+    except Exception as e:
+        print(f"❌ Even fallback logging failed: {e}")
+
 def get_blocked_times_from_sheet():
     """Return list of datetime objects (blocked slots) from Google Sheet logs"""
     if not sheets_available or not sheet:
@@ -453,48 +389,38 @@ def get_blocked_times_from_sheet():
     try:
         records = sheet.get_all_records()  # Returns list of dicts
         for rec in records:
-            date = str(rec.get("Date", "")).strip()
-            time = str(rec.get("Time", "")).strip()
+            date = rec.get("Date", "").strip()
+            time = rec.get("Time", "").strip()
             status = str(rec.get("Status", "")).strip()
 
             if not date or not time:
                 continue
 
-            # ✅ Block only scheduled posts (success or failure) - any status means it was scheduled
-            if status:  # Any non-empty status means this time slot was used
-                dt_str = f"{date} {time}"
-                dt = None
-
-                # Flexible parsing to match both logging styles
-                formats = [
-                    "%Y-%m-%d %H:%M:%S",
-                    "%Y-%m-%d %H:%M",
-                    "%d/%m/%Y %H:%M:%S", 
-                    "%d/%m/%Y %H:%M",
-                    "%Y/%m/%d %H:%M:%S",
-                    "%Y/%m/%d %H:%M",
-                    "%m/%d/%Y %H:%M:%S",
-                    "%m/%d/%Y %H:%M",
-                ]
-
-                for fmt in formats:
-                    try:
-                        dt = datetime.strptime(dt_str, fmt)
-                        break
-                    except ValueError:
-                        continue
-
-                if dt:
-                    # Return naive datetime - timezone handling will be done in main function
-                    blocked.append(dt)
-                    print(f"🚫 Blocked time slot found: {dt} (Status: {status})")
-                else:
-                    print(f"⚠️ Could not parse datetime: {dt_str}")
-
+            # Block both ✅ and ❌ posts so slots aren't reused
+            if status:
+                try:
+                    dt_str = f"{date} {time}"
+                    # Try flexible parsing with multiple formats
+                    dt = None
+                    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"]:
+                        try:
+                            dt = datetime.strptime(dt_str, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    
+                    if dt:
+                        blocked.append(dt)
+                    else:
+                        print(f"⚠️ Could not parse datetime: {dt_str}")
+                        
+                except Exception as e:
+                    print(f"⚠️ Skipping invalid datetime row: {rec} ({e})")
+                    
     except Exception as e:
         print(f"❌ Error reading blocked times from sheet: {e}")
 
-    print(f"📊 Total blocked time slots found: {len(blocked)}")
+    print(f"📊 Found {len(blocked)} blocked time slots")
     return blocked
 
 async def send_telegram_message(image_path: str, post_text: str, post_number: int, category: str, schedule_time: datetime):
@@ -521,23 +447,22 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
 
         message = (post_text or "").strip()  # ensures string
 
-        caption_check = check_caption_length(message)
+        MAX_CAPTION_LENGTH = 1024
+        MAX_TEXT_LENGTH = 4096
 
         if media and message:
-            if caption_check["can_use_as_caption"]:
-                # ✅ Caption fits - send with image
+            if len(message) <= MAX_CAPTION_LENGTH:
+                # Send image with caption (safe)
                 input_media = InputMediaUploadedPhoto(file=media)
                 await client(SendMediaRequest(
                     peer=entity,
                     media=input_media,
-                    message=caption_check["safe_caption"],  # safe version
+                    message=message,
                     schedule_date=schedule_time
                 ))
-                print(f"✅ Sent image with caption for post {post_number} at {schedule_time}")
-            
+                print(f"📤 Sent image with caption for post {post_number}")
             else:
-                # ⚠️ Caption too long - new strategy:
-                # Step 1: Send image with NO caption
+                # Caption too long, send image first without caption
                 input_media = InputMediaUploadedPhoto(file=media)
                 await client(SendMediaRequest(
                     peer=entity,
@@ -545,26 +470,19 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
                     message="",  # no caption
                     schedule_date=schedule_time
                 ))
-                print(f"📸 Sent image only (caption too long) at {schedule_time}")
-
-                # Step 2: Send full text after 1 min
-                text_schedule_time = calculate_delayed_schedule_time(schedule_time, MESSAGE_DELAY_MINUTES)
-                text_chunks = split_long_message(message, MAX_TEXT_LENGTH)
-
-                for i, chunk in enumerate(text_chunks):
-                    chunk_schedule_time = text_schedule_time + timedelta(seconds=i * 30)
+                # Then send the text separately as a message
+                # (Add a small delay to avoid flooding)
+                import asyncio
+                await asyncio.sleep(1)
+                # Truncate text if longer than max allowed
+                chunks = [message[i:i+MAX_TEXT_LENGTH] for i in range(0, len(message), MAX_TEXT_LENGTH)]
+                for chunk in chunks:
                     await client(SendMessageRequest(
                         peer=entity,
                         message=chunk,
-                        schedule_date=chunk_schedule_time
+                        schedule_date=schedule_time
                     ))
-                    print(f"📝 Scheduled text chunk {i+1}/{len(text_chunks)} ({len(chunk)} chars) at {chunk_schedule_time}")
-
-                # Log both separately
-                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image only)", schedule_time, "")
-                log_post_status_gsheet(f"{post_number}-text", category, "✅ Scheduled (Text)", text_schedule_time, message)
-
-  
+                print(f"📤 Sent image + separate text for post {post_number}")
         elif media:
             # Image only
             input_media = InputMediaUploadedPhoto(file=media)
@@ -680,41 +598,3 @@ def validate_post_structure(text_content: str) -> Dict[str, any]:
         validation_result["errors"].append(f"Failed to parse posts: {str(e)}")
     
     return validation_result
-
-
-def log_post_status_local_fallback(post_number, category, status, schedule_time, message):
-    """Fallback logging to local Excel file if Google Sheets fails"""
-    try:
-        # Format datetime consistently
-        schedule_time = format_datetime_consistently(schedule_time)
-        
-        # Convert to Asia/Kolkata (IST)
-        local_tz = pytz.timezone("Asia/Kolkata")
-        local_time = schedule_time.astimezone(local_tz)
-        
-        date_str = local_time.strftime("%Y-%m-%d")
-        time_str = local_time.strftime("%H:%M:%S")
-        
-        new_log = {
-            "Post Number": int(post_number) if post_number else 0,
-            "Category": str(category).strip() if category else 'Uncategorized',
-            "Date": date_str,
-            "Time": time_str,
-            "Status": str(status).strip() if status else 'Unknown',
-            "Message": safe_truncate_text(message, 200),
-        }
-
-        os.makedirs("logs", exist_ok=True)
-        excel_path = os.path.join("logs", "post_logs.xlsx")
-
-        if os.path.exists(excel_path):
-            df = pd.read_excel(excel_path)
-            df = pd.concat([df, pd.DataFrame([new_log])], ignore_index=True)
-        else:
-            df = pd.DataFrame([new_log])
-
-        df.to_excel(excel_path, index=False)
-        print(f"📁 Logged to local fallback file: {excel_path}")
-        
-    except Exception as e:
-        print(f"❌ Even fallback logging failed: {e}")

@@ -7,10 +7,8 @@ import os, re, json
 from typing import List
 from datetime import datetime, timezone,timedelta
 from logs_api import router as logs_router
-from telegram_utils import extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet,initialize_google_sheets,sheets_available
+from telegram_utils import extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet
 import pandas as pd
-import pytz
-ist = pytz.timezone("Asia/Kolkata")
 
 
 UPLOAD_DIR = "uploads"
@@ -119,6 +117,7 @@ async def auto_schedule(
     send_image_only: bool = Form(default=False),
     interval_minutes: int = Form(default=0),  # 0 = Auto distribute
     scheduling_mode: str = Form(default="auto")  # auto, manual, text_file, interval
+
 ):
     try:
         # Clear upload directory
@@ -156,6 +155,7 @@ async def auto_schedule(
                 image_map[post_num] = filepath
                 print(f"🎯 Mapped image {file.filename} to post {post_num}")
 
+
         # Combine all post numbers
         all_post_nums = sorted(set(text_posts.keys()) | set(image_map.keys()))
         image_only_posts = [num for num in image_map if num not in text_posts]
@@ -170,22 +170,13 @@ async def auto_schedule(
             return JSONResponse(status_code=400, content={"error": "No valid posts detected."})
 
         # Parse start and end date-times
-        start_dt = round_to_nearest_5(ist.localize(datetime.fromisoformat(start_time)))
-        end_dt = round_to_nearest_5(ist.localize(datetime.fromisoformat(end_time)))
+        start_dt = round_to_nearest_5(datetime.fromisoformat(start_time))
+        end_dt = round_to_nearest_5(datetime.fromisoformat(end_time))
 
-        # Get blocked times from Google Sheet (these are naive datetime objects)
-        sheet_blocked_times_naive = get_blocked_times_from_sheet()
-        
-        # Convert blocked times to IST timezone-aware datetimes for comparison
-        blocked_times_ist = set()
-        for naive_dt in sheet_blocked_times_naive:
-            # Assume sheet times are in IST and make them timezone-aware
-            ist_dt = ist.localize(naive_dt)
-            # Round to nearest 5 minutes to match our grid
-            rounded_dt = round_to_nearest_5(ist_dt)
-            blocked_times_ist.add(rounded_dt)
-        
-        print(f"📅 Blocked times from GSheet (IST): {sorted(blocked_times_ist)}")
+        # Already-blocked times from logs
+        log_blocked_times = set(get_blocked_times_from_sheet())
+        assigned_slots = set()
+        blocked_times = log_blocked_times | assigned_slots
 
         # Build 5-min grid inside the window
         ui_grid = []
@@ -194,13 +185,8 @@ async def auto_schedule(
             ui_grid.append(round_to_nearest_5(g))
             g += timedelta(minutes=5)
 
-        # Filter out blocked times from available slots
-        available_slots = [slot for slot in ui_grid if slot not in blocked_times_ist]
-        print(f"📊 Available slots: {len(available_slots)} out of {len(ui_grid)} total slots")
-
         # Scheduling logic
         post_times = {}
-        assigned_slots = set()
 
         form_data = await request.form()
         times = form_data.getlist('times[]')
@@ -214,17 +200,14 @@ async def auto_schedule(
                     try:
                         post_num = int(post_str.strip())
                         full_time = f"{start_dt.date()}T{time_str.strip()}"
-                        dt_time = ist.localize(round_to_nearest_5(datetime.fromisoformat(full_time)))
+                        dt_time = round_to_nearest_5(datetime.fromisoformat(full_time))
 
-                        # Ensure custom time is on the same date as the selected date
-                        if dt_time.date() != start_dt.date():
+                        if dt_time < start_dt or dt_time > end_dt:
                             return JSONResponse(status_code=400, content={
-                                "error": f"Custom time {time_str.strip()} must be on the selected date {start_dt.date()}"
+                                "error": f"Custom time {time_str.strip()} is outside the selected window"
                             })
-                        
-                        # Skip if blocked (this is the key fix)
-                        if dt_time in blocked_times_ist:
-                            print(f"⚠️ Custom time {dt_time} is blocked (from GSheet). Skipping post {post_num}.")
+                        if dt_time in log_blocked_times:
+                            print(f"⚠️ Custom time {time_str.strip()} is blocked, marking as N/A")
                             post_times[post_num] = None
                             continue
 
@@ -235,82 +218,55 @@ async def auto_schedule(
                         print(f"Invalid time format: {entry} - {e}")
                         continue
 
-        # Get remaining available slots (excluding both blocked times and assigned slots)
-        remaining_available_slots = [
-            slot for slot in available_slots 
-            if slot not in assigned_slots
-        ]
-        remaining_available_slots.sort()
-
         # Assign remaining posts
-        unassigned_posts = [num for num in all_post_nums if num not in post_times]
-        
         if interval_minutes > 0:
-            # Fixed interval scheduling - only use available slots
-            current_slot_index = 0
-            current = start_dt
-            
-            for post_num in unassigned_posts:
-                # Find next available slot at or after current time
-                while current_slot_index < len(remaining_available_slots):
-                    if remaining_available_slots[current_slot_index] >= current:
-                        slot = remaining_available_slots[current_slot_index]
-                        post_times[post_num] = slot
-                        assigned_slots.add(slot)
-                        remaining_available_slots.pop(current_slot_index)
-                        print(f"✅ Interval scheduling: Post {post_num} at {slot}")
-                        break
-                    current_slot_index += 1
-                else:
-                    # No more available slots
-                    post_times[post_num] = None
-                    print(f"⚠️ No available slot for post {post_num}")
-                
-                current += timedelta(minutes=interval_minutes)
-        else:
-            # Auto distribute evenly across remaining available slots
-            if len(unassigned_posts) <= len(remaining_available_slots):
-                if len(unassigned_posts) > 1:
-                    # Distribute evenly across available slots
-                    step = len(remaining_available_slots) // len(unassigned_posts)
-                    step = max(1, step)  # At least step of 1
-                else:
-                    step = 0
-                
-                for i, post_num in enumerate(unassigned_posts):
-                    slot_index = min(i * step, len(remaining_available_slots) - 1)
-                    slot = remaining_available_slots[slot_index]
-                    post_times[post_num] = slot
-                    assigned_slots.add(slot)
-                    print(f"✅ Auto distribute: Post {post_num} at {slot}")
-            else:
-                # More posts than available slots - assign what we can
-                for i, post_num in enumerate(unassigned_posts):
-                    if i < len(remaining_available_slots):
-                        slot = remaining_available_slots[i]
-                        post_times[post_num] = slot
-                        assigned_slots.add(slot)
-                        print(f"✅ Auto distribute: Post {post_num} at {slot}")
+            # Fixed interval scheduling
+            current = start_dt + timedelta(minutes=interval_minutes)
+            for post_num in all_post_nums:
+                if post_num not in post_times:
+                    if current <= end_dt:
+                        slot = round_to_nearest_5(current)
+                        if slot not in log_blocked_times:
+                            post_times[post_num] = slot
+                            assigned_slots.add(slot)
+                        else:
+                            post_times[post_num] = None
+                        current += timedelta(minutes=interval_minutes)
                     else:
                         post_times[post_num] = None
-                        print(f"⚠️ No available slot for post {post_num}")
+        else:
+            # Auto distribute evenly
+            unassigned_posts = [num for num in all_post_nums if num not in post_times]
+            total_posts = len(unassigned_posts)
+            if total_posts > 1:
+                step = int((end_dt - start_dt).total_seconds() // 60 // (total_posts - 1))
+            else:
+                step = 0
+            current = start_dt
+            for post_num in unassigned_posts:
+                slot = round_to_nearest_5(current)
+                if slot not in log_blocked_times:
+                    post_times[post_num] = slot
+                    assigned_slots.add(slot)
+                else:
+                    post_times[post_num] = None
+                current += timedelta(minutes=step or 1)
 
-        # Create time slots for frontend display
-        all_blocked_times = blocked_times_ist | assigned_slots
+        # Merge assigned + logged blocked
+        blocked_times = set(log_blocked_times) | assigned_slots
+
+        # Free slots for UI
         time_slots_for_frontend = []
         for slot in ui_grid:
-            status = "blocked" if slot in blocked_times_ist else ("assigned" if slot in assigned_slots else "free")
             time_slots_for_frontend.append({
                 "time": slot.strftime("%Y-%m-%d %H:%M"),
-                "status": status
+                "status": "blocked" if slot in blocked_times else "free"
             })
 
-        # Process and schedule posts
+        # Send / preview
         preview_posts = []
         scheduled_count = 0
         failed_count = 0
-        skipped_count = 0
-        
         for post_num in all_post_nums:
             scheduled_time = post_times.get(post_num)
             image_path = image_map.get(post_num)
@@ -328,27 +284,10 @@ async def auto_schedule(
                     "custom_time": custom_time,
                     "time": "N/A",
                     "status": "skipped",
-                    "error": "No available slot within selected window"
+                    "error": "No available slot within window"
                 })
-                skipped_count += 1
                 continue
 
-            # Double-check: don't schedule on blocked times
-            if scheduled_time in blocked_times_ist:
-                preview_posts.append({
-                    "post": post_num,
-                    "image": os.path.basename(image_path) if image_path else None,
-                    "text": post_text,
-                    "category": category,
-                    "custom_time": custom_time,
-                    "time": scheduled_time.strftime("%H:%M"),
-                    "status": "skipped",
-                    "error": "Time slot is blocked in Google Sheet"
-                })
-                skipped_count += 1
-                continue
-
-            # Schedule the post
             schedule_time = to_utc_naive(scheduled_time)
             try:
                 await send_telegram_message(
@@ -379,41 +318,19 @@ async def auto_schedule(
             })
 
         return JSONResponse({
-            "status": f"Scheduled {scheduled_count} posts, {failed_count} failed, {skipped_count} skipped (blocked times avoided)",
+            "status": f"Scheduled {scheduled_count} posts between {start_time} and {end_time}, {failed_count} failed",
             "posts": preview_posts,
             "scheduled": scheduled_count,
             "failed": failed_count,
-            "skipped": skipped_count,
             "total": len(all_post_nums),
-            "blocked_slots": len(blocked_times_ist),
-            "time_slots": time_slots_for_frontend
+            "time_slots": time_slots_for_frontend  # <== use the new labeled list
         })
+
 
     except Exception as e:
         print(f"Error in /api/auto-schedule: {e}")
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
-@app.post("/api/sheets/connect-or-check")
-async def connect_or_check(request: Request):
-    global sheets_available
-    body = await request.json()
-    reconnect = body.get("reconnect", False)
-
-    if reconnect or not sheets_available:
-        # Attempt to reconnect
-        success = initialize_google_sheets()
-        sheets_available = success
-        return {
-            "connected": success,
-            "message": "✅ Connected to Google Sheets" if success else "❌ Failed to connect Google Sheets"
-        }
-    else:
-        # Just return current status
-        return {
-            "connected": sheets_available,
-            "message": "✅ Google Sheets connected" if sheets_available else "❌ Google Sheets not connected"
-        }
-        
 @app.get("/api/calendar-slots")
 def get_calendar_slots(date: str = Query(..., description="Format: YYYY-MM-DD")):
     log_file = os.path.join("logs", "post_logs.xlsx")

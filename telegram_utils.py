@@ -20,7 +20,26 @@ SERVICE_ACCOUNT_FILE = os.path.join(os.path.dirname(__file__), "service_account.
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", 
           "https://www.googleapis.com/auth/drive"]
 SHEET_ID = "1seb2pGu1XekQmNcHC-6Ma_y9tGRyhTo33PrR8sA-EBc"  # from your sheet URL
-
+# Replace: target_channel = os.getenv("TELEGRAM_TARGET_CHANNEL", "amazonindiaassociates")
+# With:
+CHANNELS = {
+    'amazonindiaassociates': {
+        'username': 'amazonindiaassociates',
+        'sheet_name': 'Amazon_India_Associates'
+    },
+    'Amazon_Associates_FashionBeauty': {
+        'username': 'Amazon_Associates_FashionBeauty', 
+        'sheet_name': 'Fashion_Beauty'
+    },
+    'Amazon_Associates_HomeKitchen': {
+        'username': 'Amazon_Associates_HomeKitchen',
+        'sheet_name': 'Home_Kitchen'
+    },
+    'Amazon_Associates_Consumables': {
+        'username': 'Amazon_Associates_Consumables',
+        'sheet_name': 'Consumables'
+    }
+}
 # Global variables for sheet connection
 gc = None
 sheet = None
@@ -32,40 +51,42 @@ CAPTION_SAFETY_BUFFER = 50  # Safety buffer for caption length
 MESSAGE_DELAY_MINUTES = 1   # Delay between image and text when separated
 
 def initialize_google_sheets():
-    """Initialize Google Sheets connection with proper error handling"""
+    """Initialize Google Sheets connection with multiple sheets for channels"""
     global gc, sheet
     try:
         creds = Credentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE, scopes=SCOPES
         )
         gc = gspread.authorize(creds)
-        sheet = gc.open_by_key(SHEET_ID).sheet1
+        workbook = gc.open_by_key(SHEET_ID)
         
-        # Ensure headers exist in the sheet
-        try:
-            headers = sheet.row_values(1)
-            expected_headers = ["Post Number", "Category", "Date", "Time", "Status", "Message"]
+        # Ensure each channel has its own sheet
+        expected_headers = ["Post Number", "Category", "Date", "Time", "Status", "Message", "Channel"]
+        
+        for channel_id, channel_info in CHANNELS.items():
+            sheet_name = channel_info['sheet_name']
+            try:
+                channel_sheet = workbook.worksheet(sheet_name)
+            except gspread.WorksheetNotFound:
+                print(f"Creating new sheet: {sheet_name}")
+                channel_sheet = workbook.add_worksheet(title=sheet_name, rows=1000, cols=10)
             
-            if not headers or headers != expected_headers:
-                print("Setting up sheet headers...")
-                sheet.clear()
-                sheet.append_row(expected_headers)
-                
-        except Exception as header_error:
-            print(f"Header setup error: {header_error}")
-            sheet.append_row(["Post Number", "Category", "Date", "Time", "Status", "Message"])
+            # Ensure headers exist
+            try:
+                headers = channel_sheet.row_values(1)
+                if not headers or headers != expected_headers:
+                    print(f"Setting up headers for {sheet_name}...")
+                    channel_sheet.clear()
+                    channel_sheet.append_row(expected_headers)
+            except Exception as header_error:
+                print(f"Header setup error for {sheet_name}: {header_error}")
+                channel_sheet.append_row(expected_headers)
         
-        print("✅ Google Sheets connection successful")
+        print("✅ Google Sheets connection successful for all channels")
         return True
-    except FileNotFoundError:
-        print(f"❌ Service account file not found: {SERVICE_ACCOUNT_FILE}")
-        return False
     except Exception as e:
-        import traceback
-        print(f"❌ Google Sheets setup error: {type(e).__name__}: {e}")
-        traceback.print_exc()
+        print(f"❌ Google Sheets setup error: {e}")
         return False
-
 # Initialize sheets connection
 sheets_available = initialize_google_sheets()
 
@@ -77,7 +98,7 @@ api_id = int(os.getenv("TELEGRAM_API_ID"))
 api_hash = os.getenv("TELEGRAM_API_HASH")
 phone = os.getenv("TELEGRAM_PHONE_NUMBER")
 session_string = os.getenv("TELETHON_SESSION")
-target_channel = os.getenv("TELEGRAM_TARGET_CHANNEL", "amazonindiaassociates")  # Just username, NOT t.me link
+
 client = TelegramClient(StringSession(session_string), api_id, api_hash)
 
 
@@ -244,36 +265,29 @@ def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
                     next_start = start_matches[i + 1]
                     end_pos = next_start.start()
 
-            # Extract content between start and end
-            content = text[start_pos:end_pos].strip()
-            
-            # Parse the content
+            content = text[start_pos:end_pos]
             lines = content.splitlines()
             category = None
             custom_time = None
             text_lines = []
-            
+
             for line in lines:
-                line_clean = line.strip()
-                if not line_clean:
+                stripped = line.strip()
+                # Category check
+                if stripped.lower().startswith("category:"):
+                    category = stripped[len("category:"):].strip()
                     continue
-                    
-                # Check for category
-                if line_clean.lower().startswith("category:"):
-                    category = line_clean[len("category:"):].strip()
-                    continue
-                
-                # Check for time
+                # Time check
                 time_match = time_pattern.search(line)
                 if time_match:
                     custom_time = time_match.group(1)
                     print(f"🕐 Found custom time for post {post_num}: {custom_time}")
                     continue
-                
-                # Regular content line
+                # Keep line exactly (including blank lines)
                 text_lines.append(line)
 
-            clean_text = "\n".join(text_lines).strip()
+            clean_text = "\n".join(text_lines).rstrip()
+
             
             posts[post_num] = {
                 "category": category,
@@ -284,7 +298,6 @@ def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
             print(f"📋 Extracted Post {post_num}: Category='{category}', CustomTime='{custom_time}', TextLength={len(clean_text)}")
 
     return posts
-
 
 def parse_custom_time(time_str: str, base_date: datetime) -> datetime:
     """
@@ -397,9 +410,17 @@ def append_row_to_sheet(values):
     
     return False
 
-def log_post_status_gsheet(post_number, category, status, schedule_time, message):
+def log_post_status_gsheet(post_number, category, status, schedule_time, message, channel_id):
     """Log post status to Google Sheets with consistent formatting"""
+    if not sheets_available or not gc:
+        log_post_status_local_fallback(post_number, category, status, schedule_time, message, channel_id)
+        return
+
     try:
+        workbook = gc.open_by_key(SHEET_ID)
+        sheet_name = CHANNELS[channel_id]['sheet_name']
+        channel_sheet = workbook.worksheet(sheet_name)
+        
         # Format datetime consistently
         schedule_time = format_datetime_consistently(schedule_time)
         
@@ -425,25 +446,53 @@ def log_post_status_gsheet(post_number, category, status, schedule_time, message
             date_str,
             time_str,
             status,
-            message_truncated
+            message_truncated,
+            CHANNELS[channel_id]['username']
         ]
         
         # Log to console for debugging
         print(f"📝 Logging: Post {post_number} | {category} | {date_str} {time_str} | {status}")
         
         # Append to sheet
-        success = append_row_to_sheet(values)
+        success = append_row_to_sheet_channel(channel_sheet, values)
         
         if not success:
-            # Fallback to local file logging if Google Sheets fails
-            log_post_status_local_fallback(post_number, category, status, schedule_time, message)
+            log_post_status_local_fallback(post_number, category, status, schedule_time, message, channel_id)
             
     except Exception as e:
         print(f"❌ Error in log_post_status_gsheet: {e}")
-        # Fallback to local logging
-        log_post_status_local_fallback(post_number, category, status, schedule_time, message)
+        log_post_status_local_fallback(post_number, category, status, schedule_time, message, channel_id)
 
-def log_post_status_local_fallback(post_number, category, status, schedule_time, message):
+def append_row_to_sheet_channel(channel_sheet, values):
+    """Append row to specific channel sheet with retry logic"""
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Ensure all values are strings and properly formatted
+            formatted_values = []
+            for val in values:
+                if val is None:
+                    formatted_values.append("")
+                else:
+                    formatted_values.append(str(val).strip())
+            
+            channel_sheet.append_row(formatted_values)
+            print(f"✅ Successfully logged to Google Sheets (attempt {attempt + 1})")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Attempt {attempt + 1} failed to append row: {e}")
+            if attempt == max_retries - 1:
+                print("❌ All attempts failed to write to Google Sheets")
+                return False
+            
+            # Wait before retry
+            import time
+            time.sleep(2 ** attempt)  # Exponential backoff
+    
+    return False
+
+def log_post_status_local_fallback(post_number, category, status, schedule_time, message, channel_id):
     """Fallback logging to local Excel file if Google Sheets fails"""
     try:
         # Format datetime consistently
@@ -463,6 +512,7 @@ def log_post_status_local_fallback(post_number, category, status, schedule_time,
             "Time": time_str,
             "Status": str(status).strip() if status else 'Unknown',
             "Message": safe_truncate_text(message, 200),
+            "Channel": CHANNELS.get(channel_id, {}).get('username', channel_id)
         }
 
         os.makedirs("logs", exist_ok=True)
@@ -480,51 +530,72 @@ def log_post_status_local_fallback(post_number, category, status, schedule_time,
     except Exception as e:
         print(f"❌ Even fallback logging failed: {e}")
 
-def get_blocked_times_from_sheet():
-    """Return list of datetime objects (blocked slots) from Google Sheet logs"""
-    if not sheets_available or not sheet:
-        print("⚠️ Google Sheets not available, returning empty blocked times")
-        return []
+def get_blocked_times_from_sheet(channel_ids=None):
+    """Return blocked times, optionally filtered by channel"""
+    if not gc:
+        print("⚠️ Google Sheets connection not available, trying to initialize...")
+        if not initialize_google_sheets():
+            return []
     
     blocked = []
     try:
-        records = sheet.get_all_records()  # Returns list of dicts
-        for rec in records:
-            date = rec.get("Date", "").strip()
-            time = rec.get("Time", "").strip()
-            status = str(rec.get("Status", "")).strip()
+        workbook = gc.open_by_key(SHEET_ID)
+        channels_to_check = channel_ids or list(CHANNELS.keys())
+        
+        for channel_id in channels_to_check:
+            sheet_name = CHANNELS[channel_id]['sheet_name']
+            try:
+                channel_sheet = workbook.worksheet(sheet_name)
+                records = channel_sheet.get_all_records()
+                
+                for rec in records:
+                    date = str(rec.get("Date", "")).strip()
+                    time = str(rec.get("Time", "")).strip()
+                    status = str(rec.get("Status", "")).strip()
 
-            if not date or not time:
+                    if not date or not time:
+                        continue
+
+                    if status:  # Any non-empty status means this time slot was used
+                        dt_str = f"{date} {time}"
+                        dt = None
+
+                        # Flexible parsing to match both logging styles
+                        formats = [
+                            "%Y-%m-%d %H:%M:%S",
+                            "%Y-%m-%d %H:%M",
+                            "%d/%m/%Y %H:%M:%S", 
+                            "%d/%m/%Y %H:%M",
+                            "%Y/%m/%d %H:%M:%S",
+                            "%Y/%m/%d %H:%M",
+                            "%m/%d/%Y %H:%M:%S",
+                            "%m/%d/%Y %H:%M",
+                        ]
+
+                        for fmt in formats:
+                            try:
+                                dt = datetime.strptime(dt_str, fmt)
+                                break
+                            except ValueError:
+                                continue
+
+                        if dt:
+                            blocked.append(dt)
+                            print(f"🚫 Blocked time slot found: {dt} (Status: {status}) from {sheet_name}")
+                        else:
+                            print(f"⚠️ Could not parse datetime: {dt_str}")
+                            
+            except gspread.WorksheetNotFound:
+                print(f"Sheet {sheet_name} not found, skipping")
                 continue
-
-            # Block both ✅ and ❌ posts so slots aren't reused
-            if status:
-                try:
-                    dt_str = f"{date} {time}"
-                    # Try flexible parsing with multiple formats
-                    dt = None
-                    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"]:
-                        try:
-                            dt = datetime.strptime(dt_str, fmt)
-                            break
-                        except ValueError:
-                            continue
-                    
-                    if dt:
-                        blocked.append(dt)
-                    else:
-                        print(f"⚠️ Could not parse datetime: {dt_str}")
-                        
-                except Exception as e:
-                    print(f"⚠️ Skipping invalid datetime row: {rec} ({e})")
-                    
+                
     except Exception as e:
-        print(f"❌ Error reading blocked times from sheet: {e}")
-
-    print(f"📊 Found {len(blocked)} blocked time slots")
+        print(f"❌ Error reading blocked times: {e}")
+    
+    print(f"📊 Total blocked time slots found: {len(blocked)}")
     return blocked
-
-async def send_telegram_message(image_path: str, post_text: str, post_number: int, category: str, schedule_time: datetime):
+    
+async def send_telegram_message(image_path: str, post_text: str, post_number: int, category: str, schedule_time: datetime, channel_username: str, channel_id: str):
     """Send Telegram message with improved error handling and consistent logging"""
     try:
         if not client.is_connected():
@@ -532,7 +603,7 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
         if not await client.is_user_authorized():
             raise Exception("Telegram client not authorized")
 
-        entity = await client.get_entity(target_channel)
+        entity = await client.get_entity(channel_username)
 
         # Upload image if exists
         media = None
@@ -561,7 +632,6 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
                     schedule_date=schedule_time
                 ))
                 print(f"✅ Sent image with caption for post {post_number} at {schedule_time}")
-                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image+Caption)", schedule_time, caption_check["safe_caption"])
             
             else:
                 # ⚠️ Caption too long - new strategy:
@@ -589,8 +659,11 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
                     print(f"📝 Scheduled text chunk {i+1}/{len(text_chunks)} ({len(chunk)} chars) at {chunk_schedule_time}")
 
                 # Log both separately
-                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image only)", schedule_time, "")
-                log_post_status_gsheet(f"{post_number}-text", category, "✅ Scheduled (Text)", text_schedule_time, message)
+                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image only)", schedule_time, "", channel_id)
+                log_post_status_gsheet(f"{post_number}-text", category, "✅ Scheduled (Text)", text_schedule_time, message, channel_id)
+                log_post_status_gsheet(post_number, category, "⚠️ No Content", schedule_time, "No text or image provided", channel_id)
+                log_post_status_gsheet(post_number, category, "✅ Scheduled", schedule_time, message, channel_id)
+                log_post_status_gsheet(post_number, category, f"❌ {error_msg}", schedule_time, message or "", channel_id)
 
   
         elif media:
@@ -620,12 +693,12 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
             return
 
         print(f"✅ Successfully scheduled post {post_number} at {schedule_time}")
-        log_post_status_gsheet(post_number, category, "✅ Scheduled", schedule_time, message)
+        log_post_status_gsheet(post_number, category, "✅ Scheduled", schedule_time, message, channel_id)
         
     except Exception as e:
         error_msg = f"Failed: {str(e)}"
         print(f"❌ Failed to schedule post {post_number}: {e}")
-        log_post_status_gsheet(post_number, category, f"❌ {error_msg}", schedule_time, message or "")
+        log_post_status_gsheet(post_number, category, f"❌ {error_msg}", schedule_time, message or "", channel_id)
 
 def match_image_to_post(post_number: int, image_filenames: list[str]) -> str | None:
     """
@@ -708,3 +781,166 @@ def validate_post_structure(text_content: str) -> Dict[str, any]:
         validation_result["errors"].append(f"Failed to parse posts: {str(e)}")
     
     return validation_result
+
+def group_posts_by_date(posts):
+    """Group posts by date for separate worksheets"""
+    from collections import defaultdict
+    
+    date_groups = defaultdict(list)
+    
+    for post in posts:
+        # Extract date from post time
+        post_date = datetime.strptime(post["time"], "%Y-%m-%d %H:%M:%S").date()
+        date_str = post_date.strftime("%d_%b_%Y")  # Format: 22_Sep_2025
+        date_groups[date_str].append(post)
+    
+    return dict(date_groups)
+# Add this missing function to your telegram_utils.py (around line 70, after other utility functions)
+
+def extract_links(text: str):
+    """Extract links from text content"""
+    if not text:
+        return []
+    url_pattern = re.compile(r"(https?://\S+|amzaff\.in/\S+)")
+    links = url_pattern.findall(text)
+    return [str(l).strip() for l in links if l]
+
+# FIXED: Update the get_channel_sheet_id function to handle channel name properly
+def get_channel_sheet_id(channel_name: str):
+    """
+    Map channel names to their dedicated Google Sheet IDs
+    """
+    # Clean the channel name - remove @ if present
+    clean_channel_name = channel_name.replace('@', '')
+    
+    CHANNEL_SHEETS = {
+        'amazonindiaassociates': '18HviAE73HrRThTlotvUIPWAbRIlIH17MGBUNj4-2Hgw',
+        'Amazon_Associates_FashionBeauty': '1Nq1R38-uYLVPzdH2yGorG7XVyfLcxVTBEYQUqF7J_sQ', 
+        'Amazon_Associates_HomeKitchen': '12vjND6MPAXR_5heIdBqUaGOf4VVvUQvONRkLwcmE7UA',
+        'Amazon_Associates_Consumables': '1smDQFHgQ0HT2_R8nKFgY527wqbdFUuyeHLbL6zWgmk0'
+    }
+    
+    sheet_id = CHANNEL_SHEETS.get(clean_channel_name, None)
+    if sheet_id:
+        print(f"📊 Using dedicated sheet for {clean_channel_name}: {sheet_id}")
+        return sheet_id
+    else:
+        print(f"⚠️ No dedicated sheet found for {clean_channel_name}, using default: {SHEET_ID}")
+        return SHEET_ID
+
+def create_channel_date_worksheet(channel_name: str, date_str: str, headers: List[str]):
+    """Create worksheet with format: 'DD Mon YYYY' (spaces, no channel name)"""
+    global gc
+    if not gc:
+        print("🔄 Initializing Google Sheets connection...")
+        if not initialize_google_sheets():
+            print("❌ Failed to initialize Google Sheets")
+            return None
+
+    try:
+        # Get the correct sheet ID for this channel
+        sheet_id = get_channel_sheet_id(channel_name)
+        print(f"🎯 Opening sheet {sheet_id} for channel {channel_name}")
+
+        sh = gc.open_by_key(sheet_id)
+
+        # Convert incoming "22_Sep_2025" → "22 Sep 2025"
+        import datetime
+        try:
+            date_obj = datetime.datetime.strptime(date_str, "%d_%b_%Y")
+            worksheet_name = date_obj.strftime("%d %b %Y")
+        except Exception:
+            # If already in correct format, just replace underscores
+            worksheet_name = date_str.replace("_", " ")
+
+        print(f"📝 Looking for worksheet: {worksheet_name}")
+
+        # Check if worksheet already exists
+        try:
+            ws = sh.worksheet(worksheet_name)
+            print(f"📋 Worksheet '{worksheet_name}' already exists in sheet {sheet_id}")
+            return ws
+        except gspread.WorksheetNotFound:
+            # Create new worksheet with only the headers you passed in
+            print(f"➕ Creating new worksheet: '{worksheet_name}' in sheet {sheet_id}")
+            ws = sh.add_worksheet(title=worksheet_name, rows=1000, cols=20)
+            ws.append_row(headers)
+            print(f"✅ Created new worksheet: '{worksheet_name}' in the correct sheet")
+            return ws
+
+    except Exception as e:
+        print(f"❌ Worksheet creation error for {channel_name}: {e}")
+        print(f"   Sheet ID attempted: {sheet_id}")
+        return None
+
+
+# FIXED: Update save_posts_to_channel_date_sheets with better logging
+def save_posts_to_channel_date_sheets(posts, channel_name: str):
+    """Save posts to channel-specific sheets with date-wise organization"""
+
+    if not posts:
+        return "❌ No posts to save"
+
+    print(f"🚀 Starting to save {len(posts)} posts for channel: {channel_name}")
+
+    # Headers (removed Date, Channel, Text Preview)
+    headers = ["Post_ID", "Time", "Views", "Full_Text", "Links_Count", "Links"]
+
+    # Group posts by date
+    date_groups = group_posts_by_date(posts)
+    print(f"📅 Posts grouped into {len(date_groups)} date groups: {list(date_groups.keys())}")
+
+    total_saved = 0
+    created_sheets = []
+
+    for date_str, date_posts in date_groups.items():
+        print(f"📝 Processing {len(date_posts)} posts for date: {date_str}")
+
+        # Create worksheet for this channel-date combination
+        ws = create_channel_date_worksheet(channel_name, date_str, headers)
+
+        if not ws:
+            print(f"❌ Failed to create worksheet for {channel_name} - {date_str}")
+            continue
+
+        # Prepare rows for this date
+        rows = []
+        for post in date_posts:
+            post_datetime = datetime.strptime(post["time"], "%Y-%m-%d %H:%M:%S")
+            time_only = post_datetime.strftime("%I:%M %p")
+
+            full_text = post.get("text", "")
+
+            # Links processing
+            links = post.get("links", [])
+            links_count = len(links)
+            links_str = ", ".join(links) if links else ""
+
+            rows.append([
+                post["id"],
+                time_only,
+                post.get("views", "N/A"),
+                full_text,
+                links_count,
+                links_str
+            ])
+
+        # Save to worksheet
+        try:
+            if rows:
+                ws.append_rows(rows)
+                total_saved += len(rows)
+                created_sheets.append(date_str)
+                print(f"✅ Saved {len(rows)} posts to {date_str} in the correct sheet")
+            else:
+                print(f"⚠️ No rows to save for {date_str}")
+        except Exception as e:
+            print(f"❌ Error saving to {date_str}: {e}")
+
+    # Summary message
+    if created_sheets:
+        sheets_list = ", ".join(created_sheets)
+        print(f"🎉 Total saved: {total_saved} posts across {len(created_sheets)} worksheets")
+        return f"✅ Saved {total_saved} posts across {len(created_sheets)} sheets: {sheets_list}"
+    else:
+        return "❌ No sheets were created or updated"

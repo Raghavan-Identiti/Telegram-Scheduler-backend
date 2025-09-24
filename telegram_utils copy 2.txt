@@ -4,7 +4,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 import re
 from typing import Dict, List
 from telegram_scheduler import TelegramScheduler
@@ -16,10 +16,18 @@ from google.oauth2.service_account import Credentials
 import pytz
 
 # --- Google Sheets Setup ---
-SERVICE_ACCOUNT_FILE = "/Users/emp_04/Desktop/Telegram_scheduler_python/Telegram-Scheduler-backend/service_account.json"
+SERVICE_ACCOUNT_FILE = os.path.join(os.path.dirname(__file__), "service_account.json")
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", 
           "https://www.googleapis.com/auth/drive"]
 SHEET_ID = "1seb2pGu1XekQmNcHC-6Ma_y9tGRyhTo33PrR8sA-EBc"  # from your sheet URL
+
+# Map channels to their sheet IDs
+SHEET_IDS = {
+    "amazonindiaassociates": os.getenv("SHEET_ID_AMAZON_INDIA"),
+    "Amazon_Associates_FashionBeauty": os.getenv("SHEET_ID_FASHION"),
+    "Amazon_Associates_HomeKitchen": os.getenv("SHEET_ID_HOMEKITCHEN"),
+    "Amazon_Associates_Consumables": os.getenv("SHEET_ID_CONSUMABLES"),
+}
 
 # Global variables for sheet connection
 gc = None
@@ -31,40 +39,48 @@ MAX_TEXT_LENGTH = 4096    # Telegram's message limit
 CAPTION_SAFETY_BUFFER = 50  # Safety buffer for caption length
 MESSAGE_DELAY_MINUTES = 1   # Delay between image and text when separated
 
-def initialize_google_sheets():
-    """Initialize Google Sheets connection with proper error handling"""
-    global gc, sheet
+def initialize_google_sheets(channel_name: str):
+    """Initialize Google Sheets connection for a specific channel."""
+    global gc
     try:
-        creds = Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE, scopes=SCOPES
-        )
-        gc = gspread.authorize(creds)
-        sheet = gc.open_by_key(SHEET_ID).sheet1
-        
-        # Ensure headers exist in the sheet
+        # Authorize once
+        if not gc:
+            creds = Credentials.from_service_account_file(
+                SERVICE_ACCOUNT_FILE, scopes=SCOPES
+            )
+            gc = gspread.authorize(creds)
+
+        # Get sheet for this channel
+        sheet_id = SHEET_IDS.get(channel_name)
+        if not sheet_id:
+            raise ValueError(f"No Google Sheet ID configured for channel {channel_name}")
+
+        sh = gc.open_by_key(sheet_id)
+        ws = sh.sheet1  # default first sheet
+
+        # Ensure headers
+        expected_headers = ["Post Number", "Category", "Date", "Time", "Status", "Message"]
         try:
-            headers = sheet.row_values(1)
-            expected_headers = ["Post Number", "Category", "Date", "Time", "Status", "Message"]
-            
+            headers = ws.row_values(1)
             if not headers or headers != expected_headers:
-                print("Setting up sheet headers...")
-                sheet.clear()
-                sheet.append_row(expected_headers)
-                
+                print(f"Setting up headers for {channel_name}...")
+                ws.clear()
+                ws.append_row(expected_headers)
         except Exception as header_error:
-            print(f"Header setup error: {header_error}")
-            sheet.append_row(["Post Number", "Category", "Date", "Time", "Status", "Message"])
-        
-        print("✅ Google Sheets connection successful")
-        return True
+            print(f"⚠️ Header setup error in {channel_name}: {header_error}")
+            ws.append_row(expected_headers)
+
+        print(f"✅ Google Sheets connection successful for {channel_name}")
+        return ws
+
     except FileNotFoundError:
         print(f"❌ Service account file not found: {SERVICE_ACCOUNT_FILE}")
-        return False
+        return None
     except Exception as e:
         import traceback
-        print(f"❌ Google Sheets setup error: {type(e).__name__}: {e}")
+        print(f"❌ Google Sheets setup error for {channel_name}: {type(e).__name__}: {e}")
         traceback.print_exc()
-        return False
+        return None
 
 # Initialize sheets connection
 sheets_available = initialize_google_sheets()
@@ -77,10 +93,25 @@ api_id = int(os.getenv("TELEGRAM_API_ID"))
 api_hash = os.getenv("TELEGRAM_API_HASH")
 phone = os.getenv("TELEGRAM_PHONE_NUMBER")
 session_string = os.getenv("TELETHON_SESSION")
-target_channel = os.getenv("TELEGRAM_TARGET_CHANNEL", "amazonindiaassociates")  # Just username, NOT t.me link
+target_channel = os.getenv("TELEGRAM_TARGET_CHANNEL", "Amazon_Associates_HomeKitchen")  # Just username, NOT t.me link
 client = TelegramClient(StringSession(session_string), api_id, api_hash)
 
 
+def get_sheet_for_channel(channel_name: str):
+    """Get Google Sheet object for a specific channel."""
+    global gc
+    if not gc:
+        creds = Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE, scopes=SCOPES
+        )
+        gc = gspread.authorize(creds)
+
+    sheet_id = SHEET_IDS.get(channel_name)
+    if not sheet_id:
+        raise ValueError(f"No Google Sheet ID configured for channel {channel_name}")
+
+    return gc.open_by_key(sheet_id)
+    
 def check_caption_length(text: str) -> Dict[str, any]:
     """
     Enhanced caption length checker with detailed analysis
@@ -188,7 +219,6 @@ def split_long_message(message, max_length=4096):
     
     return chunks
 
-
 def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
     posts = {}
 
@@ -245,36 +275,29 @@ def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
                     next_start = start_matches[i + 1]
                     end_pos = next_start.start()
 
-            # Extract content between start and end
-            content = text[start_pos:end_pos].strip()
-            
-            # Parse the content
+            content = text[start_pos:end_pos]
             lines = content.splitlines()
             category = None
             custom_time = None
             text_lines = []
-            
+
             for line in lines:
-                line_clean = line.strip()
-                if not line_clean:
+                stripped = line.strip()
+                # Category check
+                if stripped.lower().startswith("category:"):
+                    category = stripped[len("category:"):].strip()
                     continue
-                    
-                # Check for category
-                if line_clean.lower().startswith("category:"):
-                    category = line_clean[len("category:"):].strip()
-                    continue
-                
-                # Check for time
+                # Time check
                 time_match = time_pattern.search(line)
                 if time_match:
                     custom_time = time_match.group(1)
                     print(f"🕐 Found custom time for post {post_num}: {custom_time}")
                     continue
-                
-                # Regular content line
+                # Keep line exactly (including blank lines)
                 text_lines.append(line)
 
-            clean_text = "\n".join(text_lines).strip()
+            clean_text = "\n".join(text_lines).rstrip()
+
             
             posts[post_num] = {
                 "category": category,
@@ -286,19 +309,6 @@ def extract_all_posts_from_texts(text_blocks: List[str]) -> Dict[int, str]:
 
     return posts
 
-def split_long_message(message, max_length=4096):
-    if len(message) <= max_length:
-        return [message]
-
-    chunks = []
-    while len(message) > max_length:
-        split_index = message.rfind("\n", 0, max_length)
-        if split_index == -1:
-            split_index = max_length
-        chunks.append(message[:split_index])
-        message = message[split_index:].lstrip()
-    chunks.append(message)
-    return chunks
 
 def parse_custom_time(time_str: str, base_date: datetime) -> datetime:
     """
@@ -457,43 +467,6 @@ def log_post_status_gsheet(post_number, category, status, schedule_time, message
         # Fallback to local logging
         log_post_status_local_fallback(post_number, category, status, schedule_time, message)
 
-def log_post_status_local_fallback(post_number, category, status, schedule_time, message):
-    """Fallback logging to local Excel file if Google Sheets fails"""
-    try:
-        # Format datetime consistently
-        schedule_time = format_datetime_consistently(schedule_time)
-        
-        # Convert to Asia/Kolkata (IST)
-        local_tz = pytz.timezone("Asia/Kolkata")
-        local_time = schedule_time.astimezone(local_tz)
-        
-        date_str = local_time.strftime("%Y-%m-%d")
-        time_str = local_time.strftime("%H:%M:%S")
-        
-        new_log = {
-            "Post Number": int(post_number) if post_number else 0,
-            "Category": str(category).strip() if category else 'Uncategorized',
-            "Date": date_str,
-            "Time": time_str,
-            "Status": str(status).strip() if status else 'Unknown',
-            "Message": safe_truncate_text(message, 200),
-        }
-
-        os.makedirs("logs", exist_ok=True)
-        excel_path = os.path.join("logs", "post_logs.xlsx")
-
-        if os.path.exists(excel_path):
-            df = pd.read_excel(excel_path)
-            df = pd.concat([df, pd.DataFrame([new_log])], ignore_index=True)
-        else:
-            df = pd.DataFrame([new_log])
-
-        df.to_excel(excel_path, index=False)
-        print(f"📁 Logged to local fallback file: {excel_path}")
-        
-    except Exception as e:
-        print(f"❌ Even fallback logging failed: {e}")
-
 def get_blocked_times_from_sheet():
     """Return list of datetime objects (blocked slots) from Google Sheet logs"""
     if not sheets_available or not sheet:
@@ -504,38 +477,48 @@ def get_blocked_times_from_sheet():
     try:
         records = sheet.get_all_records()  # Returns list of dicts
         for rec in records:
-            date = rec.get("Date", "").strip()
-            time = rec.get("Time", "").strip()
+            date = str(rec.get("Date", "")).strip()
+            time = str(rec.get("Time", "")).strip()
             status = str(rec.get("Status", "")).strip()
 
             if not date or not time:
                 continue
 
-            # Block both ✅ and ❌ posts so slots aren't reused
-            if status:
-                try:
-                    dt_str = f"{date} {time}"
-                    # Try flexible parsing with multiple formats
-                    dt = None
-                    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"]:
-                        try:
-                            dt = datetime.strptime(dt_str, fmt)
-                            break
-                        except ValueError:
-                            continue
-                    
-                    if dt:
-                        blocked.append(dt)
-                    else:
-                        print(f"⚠️ Could not parse datetime: {dt_str}")
-                        
-                except Exception as e:
-                    print(f"⚠️ Skipping invalid datetime row: {rec} ({e})")
-                    
+            # ✅ Block only scheduled posts (success or failure) - any status means it was scheduled
+            if status:  # Any non-empty status means this time slot was used
+                dt_str = f"{date} {time}"
+                dt = None
+
+                # Flexible parsing to match both logging styles
+                formats = [
+                    "%Y-%m-%d %H:%M:%S",
+                    "%Y-%m-%d %H:%M",
+                    "%d/%m/%Y %H:%M:%S", 
+                    "%d/%m/%Y %H:%M",
+                    "%Y/%m/%d %H:%M:%S",
+                    "%Y/%m/%d %H:%M",
+                    "%m/%d/%Y %H:%M:%S",
+                    "%m/%d/%Y %H:%M",
+                ]
+
+                for fmt in formats:
+                    try:
+                        dt = datetime.strptime(dt_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+
+                if dt:
+                    # Return naive datetime - timezone handling will be done in main function
+                    blocked.append(dt)
+                    print(f"🚫 Blocked time slot found: {dt} (Status: {status})")
+                else:
+                    print(f"⚠️ Could not parse datetime: {dt_str}")
+
     except Exception as e:
         print(f"❌ Error reading blocked times from sheet: {e}")
 
-    print(f"📊 Found {len(blocked)} blocked time slots")
+    print(f"📊 Total blocked time slots found: {len(blocked)}")
     return blocked
 
 async def send_telegram_message(image_path: str, post_text: str, post_number: int, category: str, schedule_time: datetime):
@@ -562,70 +545,50 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
 
         message = (post_text or "").strip()  # ensures string
 
-                caption_check = check_caption_length(message)
+        caption_check = check_caption_length(message)
 
-
- if media and message:
+        if media and message:
             if caption_check["can_use_as_caption"]:
-                # Caption fits - send image with caption (traditional method)
+                # ✅ Caption fits - send with image
                 input_media = InputMediaUploadedPhoto(file=media)
                 await client(SendMediaRequest(
                     peer=entity,
                     media=input_media,
-                    message=message,
+                    message=caption_check["safe_caption"],  # safe version
                     schedule_date=schedule_time
                 ))
                 print(f"✅ Sent image with caption for post {post_number} at {schedule_time}")
-                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image+Caption)", schedule_time, message)
-                
+            
             else:
-                # Caption too long - use enhanced separation strategy
-                print(f"📏 Caption exceeds limit ({caption_check['length']} chars). Using separation strategy...")
-                
-                # Step 1: Send image first (with short caption if available)
-                short_caption = caption_check["safe_caption"] if caption_check["safe_caption"] else ""
+                # ⚠️ Caption too long - new strategy:
+                # Step 1: Send image with NO caption
                 input_media = InputMediaUploadedPhoto(file=media)
-                
                 await client(SendMediaRequest(
                     peer=entity,
                     media=input_media,
-                    message=short_caption,
+                    message="",  # no caption
                     schedule_date=schedule_time
                 ))
-                print(f"📸 Sent image at {schedule_time} (post {post_number})")
-                
-                # Step 2: Calculate delayed time for text
+                print(f"📸 Sent image only (caption too long) at {schedule_time}")
+
+                # Step 2: Send full text after 1 min
                 text_schedule_time = calculate_delayed_schedule_time(schedule_time, MESSAGE_DELAY_MINUTES)
-                
-                # Step 3: Prepare text content
-                remaining_text = caption_check["remaining_text"]
-                if short_caption and remaining_text:
-                    # Combine remaining text with any truncated content
-                    full_text_content = remaining_text
-                else:
-                    full_text_content = message
-                
-                # Step 4: Send text message(s) with delay
-                text_chunks = split_long_message(full_text_content, MAX_TEXT_LENGTH)
-                
+                text_chunks = split_long_message(message, MAX_TEXT_LENGTH)
+
                 for i, chunk in enumerate(text_chunks):
-                    # Add additional small delay for multiple chunks
                     chunk_schedule_time = text_schedule_time + timedelta(seconds=i * 30)
-                    
                     await client(SendMessageRequest(
                         peer=entity,
                         message=chunk,
                         schedule_date=chunk_schedule_time
                     ))
-                    
-                    print(f"📝 Scheduled text chunk {i+1}/{len(text_chunks)} at {chunk_schedule_time}")
-                
-                print(f"✅ Separated post {post_number}: Image at {schedule_time}, Text at {text_schedule_time}")
-                
-                # Log both parts
-                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image)", schedule_time, short_caption or "Image only")
-                log_post_status_gsheet(f"{post_number}-text", category, "✅ Scheduled (Text)", text_schedule_time, full_text_content)
-                
+                    print(f"📝 Scheduled text chunk {i+1}/{len(text_chunks)} ({len(chunk)} chars) at {chunk_schedule_time}")
+
+                # Log both separately
+                log_post_status_gsheet(post_number, category, "✅ Scheduled (Image only)", schedule_time, "")
+                log_post_status_gsheet(f"{post_number}-text", category, "✅ Scheduled (Text)", text_schedule_time, message)
+
+  
         elif media:
             # Image only
             input_media = InputMediaUploadedPhoto(file=media)
@@ -741,3 +704,100 @@ def validate_post_structure(text_content: str) -> Dict[str, any]:
         validation_result["errors"].append(f"Failed to parse posts: {str(e)}")
     
     return validation_result
+
+
+def log_post_status_local_fallback(post_number, category, status, schedule_time, message):
+    """Fallback logging to local Excel file if Google Sheets fails"""
+    try:
+        # Format datetime consistently
+        schedule_time = format_datetime_consistently(schedule_time)
+        
+        # Convert to Asia/Kolkata (IST)
+        local_tz = pytz.timezone("Asia/Kolkata")
+        local_time = schedule_time.astimezone(local_tz)
+        
+        date_str = local_time.strftime("%Y-%m-%d")
+        time_str = local_time.strftime("%H:%M:%S")
+        
+        new_log = {
+            "Post Number": int(post_number) if post_number else 0,
+            "Category": str(category).strip() if category else 'Uncategorized',
+            "Date": date_str,
+            "Time": time_str,
+            "Status": str(status).strip() if status else 'Unknown',
+            "Message": safe_truncate_text(message, 200),
+        }
+
+        os.makedirs("logs", exist_ok=True)
+        excel_path = os.path.join("logs", "post_logs.xlsx")
+
+        if os.path.exists(excel_path):
+            df = pd.read_excel(excel_path)
+            df = pd.concat([df, pd.DataFrame([new_log])], ignore_index=True)
+        else:
+            df = pd.DataFrame([new_log])
+
+        df.to_excel(excel_path, index=False)
+        print(f"📁 Logged to local fallback file: {excel_path}")
+        
+    except Exception as e:
+        print(f"❌ Even fallback logging failed: {e}")
+
+
+
+
+def get_sheet_for_channel(channel_name: str):
+    """Get Google Sheet object for a specific channel."""
+    global gc
+    if not gc:
+        creds = Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE, scopes=SCOPES
+        )
+        gc = gspread.authorize(creds)
+
+    sheet_id = SHEET_IDS.get(channel_name)
+    if not sheet_id:
+        raise ValueError(f"No Google Sheet ID configured for channel {channel_name}")
+
+    return gc.open_by_key(sheet_id)
+
+
+def create_new_worksheet(channel_name: str, sheet_name: str, headers: List[str]):
+    """Create a new worksheet inside the channel’s Google Sheet."""
+    sh = get_sheet_for_channel(channel_name)
+    ws = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
+    ws.append_row(headers)
+    return ws
+
+
+def save_posts_to_gsheet(posts, channel_name: str):
+    """Save posts into the channel’s Google Sheet (one tab per date)."""
+    headers = ["Post_id", "Time", "Views", "Text", "Links"]
+
+    # Tab name = today’s date
+    sheet_name = datetime.now().strftime("%Y-%m-%d")
+    sh = get_sheet_for_channel(channel_name)
+
+    try:
+        ws = sh.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = create_new_worksheet(channel_name, sheet_name, headers)
+
+    rows = []
+    for post in posts:
+        time_str = datetime.strptime(
+            post["time"], "%Y-%m-%d %H:%M:%S"
+        ).strftime("%I:%M %p")
+
+        links_str = ", ".join(post["links"]) if post["links"] else ""
+
+        rows.append([
+            post["id"],
+            time_str + " IST",
+            post["views"],
+            post["text"],
+            links_str
+        ])
+
+    ws.append_rows(rows)
+    return f"✅ Saved {len(rows)} posts to sheet '{channel_name}' → tab '{ws.title}'"

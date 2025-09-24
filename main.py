@@ -7,9 +7,15 @@ import os, re, json
 from typing import List
 from datetime import datetime, timezone,timedelta
 from logs_api import router as logs_router
-from telegram_utils import extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet,initialize_google_sheets,sheets_available
+from telegram_utils import CHANNELS, extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet,initialize_google_sheets,sheets_available,api_id, api_hash, session_string,save_posts_to_channel_date_sheets
 import pandas as pd
 import pytz
+from pydantic import BaseModel
+import openpyxl
+from telethon import TelegramClient
+from telethon.tl.types import MessageMediaPhoto
+from telethon.sessions import StringSession
+
 ist = pytz.timezone("Asia/Kolkata")
 
 
@@ -33,7 +39,6 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 app.include_router(logs_router, prefix="/api")
-
 
 def to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
@@ -107,6 +112,7 @@ def parse_custom_time(time_str: str, base_date: datetime) -> datetime:
         return None
 
 
+# Add this parameter to the function signature
 @app.post("/api/auto-schedule")
 async def auto_schedule(
     request: Request,
@@ -116,12 +122,19 @@ async def auto_schedule(
     start_time: str = Form(...),
     end_time: str = Form(...),
     times: List[str] = Form(default=[]),
+    channels: str = Form(...),  # Add this line
     send_image_only: bool = Form(default=False),
-    interval_minutes: int = Form(default=0),  # 0 = Auto distribute
-    scheduling_mode: str = Form(default="auto")  # auto, manual, text_file, interval
-
+    interval_minutes: int = Form(default=0),
+    scheduling_mode: str = Form(default="auto")
 ):
+    # Add this right after the try: statement
     try:
+        # Parse selected channels
+        selected_channels = json.loads(channels) if channels else []
+        if not selected_channels:
+            return JSONResponse(status_code=400, content={"error": "Please select at least one channel"})
+        
+        print(f"Selected channels: {selected_channels}")
         # Clear upload directory
         for f in os.listdir(UPLOAD_DIR):
             os.remove(os.path.join(UPLOAD_DIR, f))
@@ -157,7 +170,6 @@ async def auto_schedule(
                 image_map[post_num] = filepath
                 print(f"🎯 Mapped image {file.filename} to post {post_num}")
 
-
         # Combine all post numbers
         all_post_nums = sorted(set(text_posts.keys()) | set(image_map.keys()))
         image_only_posts = [num for num in image_map if num not in text_posts]
@@ -175,10 +187,19 @@ async def auto_schedule(
         start_dt = round_to_nearest_5(ist.localize(datetime.fromisoformat(start_time)))
         end_dt = round_to_nearest_5(ist.localize(datetime.fromisoformat(end_time)))
 
-        # Already-blocked times from logs
-        log_blocked_times = set(get_blocked_times_from_sheet())
-        assigned_slots = set()
-        blocked_times = log_blocked_times | assigned_slots
+        # Get blocked times from Google Sheet (these are naive datetime objects)
+        sheet_blocked_times_naive = get_blocked_times_from_sheet(selected_channels)
+        
+        # Convert blocked times to IST timezone-aware datetimes for comparison
+        blocked_times_ist = set()
+        for naive_dt in sheet_blocked_times_naive:
+            # Assume sheet times are in IST and make them timezone-aware
+            ist_dt = ist.localize(naive_dt)
+            # Round to nearest 5 minutes to match our grid
+            rounded_dt = round_to_nearest_5(ist_dt)
+            blocked_times_ist.add(rounded_dt)
+        
+        print(f"📅 Blocked times from GSheet (IST): {sorted(blocked_times_ist)}")
 
         # Build 5-min grid inside the window
         ui_grid = []
@@ -187,8 +208,13 @@ async def auto_schedule(
             ui_grid.append(round_to_nearest_5(g))
             g += timedelta(minutes=5)
 
+        # Filter out blocked times from available slots
+        available_slots = [slot for slot in ui_grid if slot not in blocked_times_ist]
+        print(f"📊 Available slots: {len(available_slots)} out of {len(ui_grid)} total slots")
+
         # Scheduling logic
         post_times = {}
+        assigned_slots = set()
 
         form_data = await request.form()
         times = form_data.getlist('times[]')
@@ -204,14 +230,15 @@ async def auto_schedule(
                         full_time = f"{start_dt.date()}T{time_str.strip()}"
                         dt_time = ist.localize(round_to_nearest_5(datetime.fromisoformat(full_time)))
 
-                          # Ensure custom time is on the same date as the selected date
+                        # Ensure custom time is on the same date as the selected date
                         if dt_time.date() != start_dt.date():
                             return JSONResponse(status_code=400, content={
                                 "error": f"Custom time {time_str.strip()} must be on the selected date {start_dt.date()}"
                             })
-                         # Check against blocked times
-                        if any(abs((dt_time - b).total_seconds()) < 60 for b in log_blocked_times):
-                            print(f"⚠️ Custom time {time_str.strip()} is blocked, marking as N/A")
+                        
+                        # Skip if blocked (this is the key fix)
+                        if dt_time in blocked_times_ist:
+                            print(f"⚠️ Custom time {dt_time} is blocked (from GSheet). Skipping post {post_num}.")
                             post_times[post_num] = None
                             continue
 
@@ -222,119 +249,197 @@ async def auto_schedule(
                         print(f"Invalid time format: {entry} - {e}")
                         continue
 
+        # Get remaining available slots (excluding both blocked times and assigned slots)
+        remaining_available_slots = [
+            slot for slot in available_slots 
+            if slot not in assigned_slots
+        ]
+        remaining_available_slots.sort()
+
         # Assign remaining posts
+        unassigned_posts = [num for num in all_post_nums if num not in post_times]
+        
         if interval_minutes > 0:
-            # Fixed interval scheduling
-            current = start_dt + timedelta(minutes=interval_minutes)
-            for post_num in all_post_nums:
-                if post_num not in post_times:
-                    if current <= end_dt:
-                        slot = round_to_nearest_5(current)
-                        if slot not in log_blocked_times:
-                            post_times[post_num] = slot
-                            assigned_slots.add(slot)
-                        else:
-                            post_times[post_num] = None
-                        current += timedelta(minutes=interval_minutes)
-                    else:
-                        post_times[post_num] = None
-        else:
-            # Auto distribute evenly
-            unassigned_posts = [num for num in all_post_nums if num not in post_times]
-            total_posts = len(unassigned_posts)
-            if total_posts > 1:
-                step = int((end_dt - start_dt).total_seconds() // 60 // (total_posts - 1))
-            else:
-                step = 0
+            # Fixed interval scheduling - only use available slots
+            current_slot_index = 0
             current = start_dt
+            
             for post_num in unassigned_posts:
-                slot = round_to_nearest_5(current)
-                if slot not in log_blocked_times:
+                # Find next available slot at or after current time
+                while current_slot_index < len(remaining_available_slots):
+                    if remaining_available_slots[current_slot_index] >= current:
+                        slot = remaining_available_slots[current_slot_index]
+                        post_times[post_num] = slot
+                        assigned_slots.add(slot)
+                        remaining_available_slots.pop(current_slot_index)
+                        print(f"✅ Interval scheduling: Post {post_num} at {slot}")
+                        break
+                    current_slot_index += 1
+                else:
+                    # No more available slots
+                    post_times[post_num] = None
+                    print(f"⚠️ No available slot for post {post_num}")
+                
+                current += timedelta(minutes=interval_minutes)
+        else:
+            # Auto distribute evenly across remaining available slots
+            if len(unassigned_posts) <= len(remaining_available_slots):
+                if len(unassigned_posts) > 1:
+                    # Distribute evenly across available slots
+                    step = len(remaining_available_slots) // len(unassigned_posts)
+                    step = max(1, step)  # At least step of 1
+                else:
+                    step = 0
+                
+                for i, post_num in enumerate(unassigned_posts):
+                    slot_index = min(i * step, len(remaining_available_slots) - 1)
+                    slot = remaining_available_slots[slot_index]
                     post_times[post_num] = slot
                     assigned_slots.add(slot)
-                else:
-                    post_times[post_num] = None
-                current += timedelta(minutes=step or 1)
+                    print(f"✅ Auto distribute: Post {post_num} at {slot}")
+            else:
+                # More posts than available slots - assign what we can
+                for i, post_num in enumerate(unassigned_posts):
+                    if i < len(remaining_available_slots):
+                        slot = remaining_available_slots[i]
+                        post_times[post_num] = slot
+                        assigned_slots.add(slot)
+                        print(f"✅ Auto distribute: Post {post_num} at {slot}")
+                    else:
+                        post_times[post_num] = None
+                        print(f"⚠️ No available slot for post {post_num}")
 
-        # Merge assigned + logged blocked
-        blocked_times = set(log_blocked_times) | assigned_slots
-
-        # Free slots for UI
+        # Create time slots for frontend display
+        all_blocked_times = blocked_times_ist | assigned_slots
         time_slots_for_frontend = []
         for slot in ui_grid:
+            status = "blocked" if slot in blocked_times_ist else ("assigned" if slot in assigned_slots else "free")
             time_slots_for_frontend.append({
                 "time": slot.strftime("%Y-%m-%d %H:%M"),
-                "status": "blocked" if slot in blocked_times else "free"
+                "status": status
             })
 
-        # Send / preview
+        # Process and schedule posts
         preview_posts = []
         scheduled_count = 0
         failed_count = 0
-        for post_num in all_post_nums:
-            scheduled_time = post_times.get(post_num)
-            image_path = image_map.get(post_num)
-            post_data = text_posts.get(post_num, {})
-            post_text = post_data.get('text') if isinstance(post_data, dict) else post_data
-            category = post_data.get('category') if isinstance(post_data, dict) else None
-            custom_time = post_data.get('custom_time') if isinstance(post_data, dict) else None
+        skipped_count = 0
+        
+        # Replace the section starting from "Process and schedule posts" until the return statement
+        # Process and schedule posts for each channel
+        all_results = []
+        total_scheduled = 0
+        total_failed = 0
+        total_skipped = 0
 
-            if not scheduled_time:
-                preview_posts.append({
+        for channel_id in selected_channels:
+            if channel_id not in CHANNELS:
+                print(f"Unknown channel: {channel_id}")
+                continue
+                
+            channel_username = CHANNELS[channel_id]['username']
+            print(f"Processing channel: @{channel_username}")
+            
+            channel_scheduled = 0
+            channel_failed = 0
+            channel_skipped = 0
+            channel_posts = []
+            
+            for post_num in all_post_nums:
+                scheduled_time = post_times.get(post_num)
+                image_path = image_map.get(post_num)
+                post_data = text_posts.get(post_num, {})
+                post_text = post_data.get('text') if isinstance(post_data, dict) else post_data
+                category = post_data.get('category') if isinstance(post_data, dict) else None
+                custom_time = post_data.get('custom_time') if isinstance(post_data, dict) else None
+
+                if not scheduled_time:
+                    channel_posts.append({
+                        "post": post_num,
+                        "image": os.path.basename(image_path) if image_path else None,
+                        "text": post_text,
+                        "category": category,
+                        "custom_time": custom_time,
+                        "time": "N/A",
+                        "status": "skipped",
+                        "error": "No available slot within selected window",
+                        "channel": f"@{channel_username}"
+                    })
+                    channel_skipped += 1
+                    continue
+
+                # Double-check: don't schedule on blocked times
+                if scheduled_time in blocked_times_ist:
+                    channel_posts.append({
+                        "post": post_num,
+                        "image": os.path.basename(image_path) if image_path else None,
+                        "text": post_text,
+                        "category": category,
+                        "custom_time": custom_time,
+                        "time": scheduled_time.strftime("%H:%M"),
+                        "status": "skipped",
+                        "error": "Time slot is blocked in Google Sheet",
+                        "channel": f"@{channel_username}"
+                    })
+                    channel_skipped += 1
+                    continue
+
+                # Schedule the post
+                schedule_time = to_utc_naive(scheduled_time)
+                try:
+                    await send_telegram_message(
+                        image_path=image_map.get(post_num),
+                        post_text=post_text,
+                        post_number=post_num,
+                        category=category,
+                        schedule_time=schedule_time,
+                        channel_username=channel_username,
+                        channel_id=channel_id
+                    )
+                    channel_scheduled += 1
+                    status = "scheduled"
+                    error = None
+                    print(f"Scheduled post {post_num} to @{channel_username} at {scheduled_time}")
+                except Exception as e:
+                    status = "failed"
+                    error = str(e)
+                    channel_failed += 1
+                    print(f"Failed to schedule post {post_num} to @{channel_username}: {e}")
+
+                channel_posts.append({
                     "post": post_num,
                     "image": os.path.basename(image_path) if image_path else None,
                     "text": post_text,
                     "category": category,
-                    "custom_time": custom_time,
-                    "time": "N/A",
-                    "status": "skipped",
-                    "error": "No available slot within window"
+                    "time": scheduled_time.strftime("%H:%M") if scheduled_time else "N/A",
+                    "status": status,
+                    "error": error,
+                    "channel": f"@{channel_username}"
                 })
-                continue
-
-            schedule_time = to_utc_naive(scheduled_time)
-            try:
-                await send_telegram_message(
-                    image_path=image_map.get(post_num),
-                    post_text=post_text,
-                    post_number=post_num,
-                    category=category,
-                    schedule_time=schedule_time
-                )
-                scheduled_count += 1
-                status = "scheduled"
-                error = None
-                print(f"✅ Scheduled post {post_num} at {scheduled_time}")
-            except Exception as e:
-                status = "failed"
-                error = str(e)
-                failed_count += 1
-                print(f"❌ Failed to schedule post {post_num}: {e}")
-
-            preview_posts.append({
-                "post": post_num,
-                "image": os.path.basename(image_path) if image_path else None,
-                "text": post_text,
-                "category": category,
-                "time": scheduled_time.strftime("%H:%M") if scheduled_time else "N/A",
-                "status": status,
-                "error": error
-            })
+            
+            # Add channel results
+            all_results.extend(channel_posts)
+            total_scheduled += channel_scheduled
+            total_failed += channel_failed
+            total_skipped += channel_skipped
+            
+            print(f"Channel @{channel_username}: {channel_scheduled} scheduled, {channel_failed} failed, {channel_skipped} skipped")
 
         return JSONResponse({
-            "status": f"Scheduled {scheduled_count} posts between {start_time} and {end_time}, {failed_count} failed",
-            "posts": preview_posts,
-            "scheduled": scheduled_count,
-            "failed": failed_count,
-            "total": len(all_post_nums),
-            "time_slots": time_slots_for_frontend  # <== use the new labeled list
+            "status": f"Scheduled {total_scheduled} posts across {len(selected_channels)} channels, {total_failed} failed, {total_skipped} skipped",
+            "posts": all_results,
+            "scheduled": total_scheduled,
+            "failed": total_failed,
+            "skipped": total_skipped,
+            "total": len(all_post_nums) * len(selected_channels),
+            "blocked_slots": len(blocked_times_ist),
+            "time_slots": time_slots_for_frontend,
+            "channels_processed": len(selected_channels)
         })
-
 
     except Exception as e:
         print(f"Error in /api/auto-schedule: {e}")
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
-
 
 @app.post("/api/sheets/connect-or-check")
 async def connect_or_check(request: Request):
@@ -357,6 +462,122 @@ async def connect_or_check(request: Request):
             "message": "✅ Google Sheets connected" if sheets_available else "❌ Google Sheets not connected"
         }
         
+
+
+# =======================
+# Request Model
+# =======================
+class ReadPostsRequest(BaseModel):
+    channel: str
+    start_time: datetime
+    end_time: datetime
+
+# =======================
+# Utility: Extract links
+# =======================
+def extract_links(text: str):
+    if not text:
+        return []
+    url_pattern = re.compile(r"(https?://\S+|amzaff\.in/\S+)")
+    links = url_pattern.findall(text)
+    return [str(l).strip() for l in links if l]
+
+# =======================
+# Utility: Save to gsheet
+# =======================
+def save_to_excel(posts, filename="posts.xlsx"):
+    import openpyxl
+    from openpyxl.styles import Alignment
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Posts"
+
+    headers = ["Post ID", "Date & Time (IST)", "Views", "Text", "Links"]
+    ws.append(headers)
+
+    for post in posts:
+        # Human readable IST time
+        time_str = datetime.strptime(
+            post['time'], "%Y-%m-%d %H:%M:%S"
+        ).strftime("%d %b %Y, %I:%M %p")
+
+        # Links: comma + space separated instead of new line
+        links_str = ", ".join(post["links"]) if post["links"] else ""
+
+        ws.append([
+            post["id"],
+            time_str + " IST",
+            post["views"],
+            post["text"],
+            # post["image"],
+            links_str
+        ])
+
+    # Autofit and wrap text
+    for col in ws.columns:
+        for cell in col:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+    wb.save(filename)
+    return filename
+
+# =======================
+# API: Read Posts
+# =======================
+
+
+# Updated main.py read-posts endpoint
+@app.post("/api/read-posts")
+async def read_posts(req: ReadPostsRequest):
+    posts_data = []
+    start_time_utc = req.start_time.astimezone(pytz.UTC)
+    end_time_utc = req.end_time.astimezone(pytz.UTC)
+
+    async with TelegramClient(StringSession(session_string), api_id, api_hash) as client:
+        async for msg in client.iter_messages(req.channel, offset_date=end_time_utc):
+            if msg.date is None:
+                continue
+
+            msg_date_utc = msg.date.replace(tzinfo=pytz.UTC)
+            if not (start_time_utc <= msg_date_utc <= end_time_utc):
+                continue
+
+            msg_date_ist = msg_date_utc.astimezone(pytz.timezone("Asia/Kolkata"))
+            text_content = msg.text if msg.text else ""
+            links = extract_links(text_content)
+
+            # Enhanced post info
+            post_info = {
+                "id": msg.id,
+                "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S"),
+                "views": msg.views if hasattr(msg, "views") else 0,
+                "text": text_content,
+                "links": links,
+                "channel": req.channel,
+                "media_type": "image" if msg.media else "text"
+            }
+
+            # Handle posts with only images
+            if msg.media and not text_content.strip() and not links:
+                post_info["text"] = "📸 Image post (no text or links)"
+
+            posts_data.append(post_info)
+
+    # Save to channel-date organized sheets using NEW function
+    save_msg = save_posts_to_channel_date_sheets(posts_data, req.channel)
+
+    return {
+        "status": "success",
+        "count": len(posts_data),
+        "message": save_msg,
+        "posts": posts_data,
+        "date_range": {
+            "start": req.start_time.strftime("%d %b %Y"),
+            "end": req.end_time.strftime("%d %b %Y")
+        },
+        "channel": req.channel
+    }
 @app.get("/api/calendar-slots")
 def get_calendar_slots(date: str = Query(..., description="Format: YYYY-MM-DD")):
     log_file = os.path.join("logs", "post_logs.xlsx")

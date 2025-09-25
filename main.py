@@ -578,6 +578,8 @@ async def read_posts(req: ReadPostsRequest):
         },
         "channel": req.channel
     }
+
+    
 @app.get("/api/calendar-slots")
 def get_calendar_slots(date: str = Query(..., description="Format: YYYY-MM-DD")):
     log_file = os.path.join("logs", "post_logs.xlsx")

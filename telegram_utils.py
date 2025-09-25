@@ -1,27 +1,31 @@
-#telegram_utils.py
+# telegram_utils.py
 import os
+import json
 import pandas as pd
 from dotenv import load_dotenv
 from telethon.sync import TelegramClient
 from telethon.sessions import StringSession
-from datetime import datetime,timezone,timedelta
+from datetime import datetime, timezone, timedelta
 import re
 from typing import Dict, List
 from telegram_scheduler import TelegramScheduler
-from datetime import datetime
 from telethon.tl.functions.messages import SendMessageRequest, SendMediaRequest
 from telethon.tl.types import InputPeerChannel, InputMediaUploadedPhoto, InputMediaUploadedDocument
 import gspread
-from google.oauth2.service_account import Credentials
+from google.oauth2 import service_account
 import pytz
 
+# --- Load environment variables ---
+load_dotenv()
+
 # --- Google Sheets Setup ---
-SERVICE_ACCOUNT_FILE = os.path.join(os.path.dirname(__file__), "service_account.json")
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets", 
-          "https://www.googleapis.com/auth/drive"]
-SHEET_ID = "1seb2pGu1XekQmNcHC-6Ma_y9tGRyhTo33PrR8sA-EBc"  # from your sheet URL
-# Replace: target_channel = os.getenv("TELEGRAM_TARGET_CHANNEL", "amazonindiaassociates")
-# With:
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+SHEET_ID = "1seb2pGu1XekQmNcHC-6Ma_y9tGRyhTo33PrR8sA-EBc"  # ✅ Keep this here (public info)
+
 CHANNELS = {
     'amazonindiaassociates': {
         'username': 'amazonindiaassociates',
@@ -40,66 +44,72 @@ CHANNELS = {
         'sheet_name': 'Consumables'
     }
 }
+
 # Global variables for sheet connection
 gc = None
 sheet = None
 
-# Enhanced Caption Limits
+# --- Enhanced Telegram Settings ---
 MAX_CAPTION_LENGTH = 1024  # Telegram's actual limit
-MAX_TEXT_LENGTH = 4096    # Telegram's message limit
-CAPTION_SAFETY_BUFFER = 50  # Safety buffer for caption length
-MESSAGE_DELAY_MINUTES = 1   # Delay between image and text when separated
+MAX_TEXT_LENGTH = 4096      # Telegram's message limit
+CAPTION_SAFETY_BUFFER = 50
+MESSAGE_DELAY_MINUTES = 1
 
 def initialize_google_sheets():
-    """Initialize Google Sheets connection with multiple sheets for channels"""
+    """Initialize Google Sheets connection securely without local service_account.json"""
     global gc, sheet
     try:
-        creds = Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_FILE, scopes=SCOPES
-        )
+        # ✅ Load credentials JSON from environment variable
+        google_creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+        if not google_creds_json:
+            raise ValueError("❌ GOOGLE_SERVICE_ACCOUNT_JSON environment variable not set!")
+
+        creds_dict = json.loads(google_creds_json)
+        creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+
         gc = gspread.authorize(creds)
         workbook = gc.open_by_key(SHEET_ID)
-        
-        # Ensure each channel has its own sheet
+
+        # ✅ Ensure each channel has its own sheet
         expected_headers = ["Post Number", "Category", "Date", "Time", "Status", "Message", "Channel"]
-        
+
         for channel_id, channel_info in CHANNELS.items():
             sheet_name = channel_info['sheet_name']
             try:
                 channel_sheet = workbook.worksheet(sheet_name)
             except gspread.WorksheetNotFound:
-                print(f"Creating new sheet: {sheet_name}")
+                print(f"📄 Creating new sheet: {sheet_name}")
                 channel_sheet = workbook.add_worksheet(title=sheet_name, rows=1000, cols=10)
             
-            # Ensure headers exist
+            # ✅ Ensure headers exist
             try:
                 headers = channel_sheet.row_values(1)
                 if not headers or headers != expected_headers:
-                    print(f"Setting up headers for {sheet_name}...")
+                    print(f"📑 Setting up headers for {sheet_name}...")
                     channel_sheet.clear()
                     channel_sheet.append_row(expected_headers)
             except Exception as header_error:
-                print(f"Header setup error for {sheet_name}: {header_error}")
+                print(f"⚠️ Header setup error for {sheet_name}: {header_error}")
                 channel_sheet.append_row(expected_headers)
         
         print("✅ Google Sheets connection successful for all channels")
         return True
+
     except Exception as e:
         print(f"❌ Google Sheets setup error: {e}")
         return False
+
 # Initialize sheets connection
 sheets_available = initialize_google_sheets()
 
-scheduler = TelegramScheduler()
-
-load_dotenv()
-
+# --- Telegram Credentials ---
 api_id = int(os.getenv("TELEGRAM_API_ID"))
 api_hash = os.getenv("TELEGRAM_API_HASH")
 phone = os.getenv("TELEGRAM_PHONE_NUMBER")
 session_string = os.getenv("TELETHON_SESSION")
 
 client = TelegramClient(StringSession(session_string), api_id, api_hash)
+scheduler = TelegramScheduler()
 
 
 def check_caption_length(text: str) -> Dict[str, any]:

@@ -15,6 +15,8 @@ import openpyxl
 from telethon import TelegramClient
 from telethon.tl.types import MessageMediaPhoto
 from telethon.sessions import StringSession
+from telethon.tl.functions.messages import GetScheduledHistoryRequest
+from telethon.tl.types import InputPeerChannel
 
 ist = pytz.timezone("Asia/Kolkata")
 
@@ -527,7 +529,6 @@ def save_to_excel(posts, filename="posts.xlsx"):
 # =======================
 
 
-# Updated main.py read-posts endpoint
 @app.post("/api/read-posts")
 async def read_posts(req: ReadPostsRequest):
     posts_data = []
@@ -547,7 +548,6 @@ async def read_posts(req: ReadPostsRequest):
             text_content = msg.text if msg.text else ""
             links = extract_links(text_content)
 
-            # Enhanced post info
             post_info = {
                 "id": msg.id,
                 "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S"),
@@ -558,14 +558,13 @@ async def read_posts(req: ReadPostsRequest):
                 "media_type": "image" if msg.media else "text"
             }
 
-            # Handle posts with only images
             if msg.media and not text_content.strip() and not links:
                 post_info["text"] = "📸 Image post (no text or links)"
 
             posts_data.append(post_info)
 
-    # Save to channel-date organized sheets using NEW function
-    save_msg = save_posts_to_channel_date_sheets(posts_data, req.channel)
+    # ✅ FIXED: pass posts_data instead of undefined 'posts'
+    save_msg = save_posts_to_channel_date_sheets(posts_data, req.channel, scheduled=False)
 
     return {
         "status": "success",
@@ -579,7 +578,46 @@ async def read_posts(req: ReadPostsRequest):
         "channel": req.channel
     }
 
-    
+@app.post("/api/scheduled-posts")
+async def read_scheduled_messages(req: ReadPostsRequest):
+    scheduled_posts = []
+
+    async with TelegramClient(StringSession(session_string), api_id, api_hash) as client:
+        # ✅ Fetch scheduled (unsent) messages
+        from telethon.tl.functions.messages import GetScheduledHistoryRequest
+        result = await client(GetScheduledHistoryRequest(peer=req.channel, hash=0))
+
+        for msg in result.messages:
+            # Convert scheduled time to IST
+            if msg.date:
+                msg_date_ist = msg.date.astimezone(pytz.timezone("Asia/Kolkata"))
+            else:
+                msg_date_ist = None
+
+            text_content = msg.message or ""
+            links = extract_links(text_content)
+
+            scheduled_posts.append({
+                "id": msg.id,
+                "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S") if msg_date_ist else "N/A",
+                "text": text_content,
+                "links": links,
+                "has_media": True if msg.media else False,
+                "channel": req.channel
+            })
+
+    # Save scheduled posts to Google Sheet (new worksheet named "DD Mon YYYY - Scheduled Posts")
+    save_msg = save_posts_to_channel_date_sheets(scheduled_posts, req.channel, scheduled=True)
+
+    return {
+        "status": "success",
+        "count": len(scheduled_posts),
+        "message": save_msg,
+        "scheduled_posts": scheduled_posts
+    }
+
+
+
 @app.get("/api/calendar-slots")
 def get_calendar_slots(date: str = Query(..., description="Format: YYYY-MM-DD")):
     log_file = os.path.join("logs", "post_logs.xlsx")

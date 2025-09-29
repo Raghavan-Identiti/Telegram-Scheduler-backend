@@ -615,7 +615,6 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
 
         entity = await client.get_entity(channel_username)
 
-        # Upload image if exists
         media = None
         
         if image_path and os.path.exists(image_path):
@@ -633,7 +632,7 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
 
         if media and message:
             if caption_check["can_use_as_caption"]:
-                # ✅ Caption fits - send with image
+                # Caption fits - send with image
                 input_media = InputMediaUploadedPhoto(file=media)
                 await client(SendMediaRequest(
                     peer=entity,
@@ -644,7 +643,7 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
                 print(f"✅ Sent image with caption for post {post_number} at {schedule_time}")
             
             else:
-                # ⚠️ Caption too long - new strategy:
+                # Caption too long - new strategy:
                 # Step 1: Send image with NO caption
                 input_media = InputMediaUploadedPhoto(file=media)
                 await client(SendMediaRequest(
@@ -838,8 +837,9 @@ def get_channel_sheet_id(channel_name: str):
         print(f"⚠️ No dedicated sheet found for {clean_channel_name}, using default: {SHEET_ID}")
         return SHEET_ID
 
-def create_channel_date_worksheet(channel_name: str, date_str: str, headers: List[str]):
-    """Create worksheet with format: 'DD Mon YYYY' (spaces, no channel name)"""
+# FIXED: Update create_channel_date_worksheet with better logging
+def create_channel_date_worksheet(channel_name: str, date_str: str, headers: List[str], scheduled: bool = False):
+    """Create worksheet with format: 'DD Mon YYYY' or 'DD Mon YYYY - Scheduled Posts'"""
     global gc
     if not gc:
         print("🔄 Initializing Google Sheets connection...")
@@ -850,18 +850,18 @@ def create_channel_date_worksheet(channel_name: str, date_str: str, headers: Lis
     try:
         # Get the correct sheet ID for this channel
         sheet_id = get_channel_sheet_id(channel_name)
-        print(f"🎯 Opening sheet {sheet_id} for channel {channel_name}")
-
         sh = gc.open_by_key(sheet_id)
 
-        # Convert incoming "22_Sep_2025" → "22 Sep 2025"
-        import datetime
+        # Convert "22_Sep_2025" → "22 Sep 2025"
         try:
             date_obj = datetime.datetime.strptime(date_str, "%d_%b_%Y")
             worksheet_name = date_obj.strftime("%d %b %Y")
         except Exception:
-            # If already in correct format, just replace underscores
             worksheet_name = date_str.replace("_", " ")
+
+        #  If scheduled, append suffix to keep sheet separate
+        if scheduled:
+            worksheet_name += " - Scheduled Posts"
 
         print(f"📝 Looking for worksheet: {worksheet_name}")
 
@@ -871,21 +871,18 @@ def create_channel_date_worksheet(channel_name: str, date_str: str, headers: Lis
             print(f"📋 Worksheet '{worksheet_name}' already exists in sheet {sheet_id}")
             return ws
         except gspread.WorksheetNotFound:
-            # Create new worksheet with only the headers you passed in
-            print(f"➕ Creating new worksheet: '{worksheet_name}' in sheet {sheet_id}")
+            # Create new worksheet
             ws = sh.add_worksheet(title=worksheet_name, rows=1000, cols=20)
             ws.append_row(headers)
-            print(f"✅ Created new worksheet: '{worksheet_name}' in the correct sheet")
+            print(f"✅ Created new worksheet: '{worksheet_name}'")
             return ws
 
     except Exception as e:
         print(f"❌ Worksheet creation error for {channel_name}: {e}")
-        print(f"   Sheet ID attempted: {sheet_id}")
         return None
 
-
 # FIXED: Update save_posts_to_channel_date_sheets with better logging
-def save_posts_to_channel_date_sheets(posts, channel_name: str):
+def save_posts_to_channel_date_sheets(posts, channel_name: str, scheduled: bool = False):
     """Save posts to channel-specific sheets with date-wise organization"""
 
     if not posts:
@@ -893,10 +890,7 @@ def save_posts_to_channel_date_sheets(posts, channel_name: str):
 
     print(f"🚀 Starting to save {len(posts)} posts for channel: {channel_name}")
 
-    # Headers (removed Date, Channel, Text Preview)
     headers = ["Post_ID", "Time", "Views", "Full_Text", "Links_Count", "Links"]
-
-    # Group posts by date
     date_groups = group_posts_by_date(posts)
     print(f"📅 Posts grouped into {len(date_groups)} date groups: {list(date_groups.keys())}")
 
@@ -906,22 +900,19 @@ def save_posts_to_channel_date_sheets(posts, channel_name: str):
     for date_str, date_posts in date_groups.items():
         print(f"📝 Processing {len(date_posts)} posts for date: {date_str}")
 
-        # Create worksheet for this channel-date combination
-        ws = create_channel_date_worksheet(channel_name, date_str, headers)
+        # ✅ Pass scheduled flag here so the sheet name is correct
+        ws = create_channel_date_worksheet(channel_name, date_str, headers, scheduled=scheduled)
 
         if not ws:
             print(f"❌ Failed to create worksheet for {channel_name} - {date_str}")
             continue
 
-        # Prepare rows for this date
         rows = []
         for post in date_posts:
             post_datetime = datetime.strptime(post["time"], "%Y-%m-%d %H:%M:%S")
             time_only = post_datetime.strftime("%I:%M %p")
 
             full_text = post.get("text", "")
-
-            # Links processing
             links = post.get("links", [])
             links_count = len(links)
             links_str = ", ".join(links) if links else ""
@@ -935,22 +926,19 @@ def save_posts_to_channel_date_sheets(posts, channel_name: str):
                 links_str
             ])
 
-        # Save to worksheet
         try:
             if rows:
                 ws.append_rows(rows)
                 total_saved += len(rows)
                 created_sheets.append(date_str)
-                print(f"✅ Saved {len(rows)} posts to {date_str} in the correct sheet")
+                print(f"✅ Saved {len(rows)} posts to {date_str} {'(Scheduled)' if scheduled else ''}")
             else:
                 print(f"⚠️ No rows to save for {date_str}")
         except Exception as e:
             print(f"❌ Error saving to {date_str}: {e}")
 
-    # Summary message
     if created_sheets:
         sheets_list = ", ".join(created_sheets)
-        print(f"🎉 Total saved: {total_saved} posts across {len(created_sheets)} worksheets")
         return f"✅ Saved {total_saved} posts across {len(created_sheets)} sheets: {sheets_list}"
     else:
         return "❌ No sheets were created or updated"

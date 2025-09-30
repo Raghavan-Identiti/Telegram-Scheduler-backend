@@ -839,7 +839,7 @@ def get_channel_sheet_id(channel_name: str):
 
 # FIXED: Update create_channel_date_worksheet with better logging
 def create_channel_date_worksheet(channel_name: str, date_str: str, headers: List[str], scheduled: bool = False):
-    """Create worksheet with format: 'DD Mon YYYY' or 'DD Mon YYYY - Scheduled Posts'"""
+    """Create worksheet with format: 'DD Mon YYYY' or 'DD Mon YYYY - Scheduled Posts' """
     global gc
     if not gc:
         print("🔄 Initializing Google Sheets connection...")
@@ -882,63 +882,147 @@ def create_channel_date_worksheet(channel_name: str, date_str: str, headers: Lis
         return None
 
 # FIXED: Update save_posts_to_channel_date_sheets with better logging
-def save_posts_to_channel_date_sheets(posts, channel_name: str, scheduled: bool = False):
-    """Save posts to channel-specific sheets with date-wise organization"""
+# telegram_utils.py (Updated sections for click tracking)
 
-    if not posts:
-        return "❌ No posts to save"
+# Add this to your existing telegram_utils.py file
+# This shows the updated save_posts_to_channel_date_sheets function
+import os
+import requests
 
-    print(f"🚀 Starting to save {len(posts)} posts for channel: {channel_name}")
+API_URL = os.getenv("LINK_CLICKS_API")
+API_KEY = "f073c95a0227414d8e053fdfa19ece0dbe29ea9a8b3fb08e2c8186fabce64bb4"
+def get_click_data_for_links(links, date_str):
+    """
+    Return dict with totals and per-link clicks.
+    """
+    telegram_total = 0
+    whatsapp_total = 0
+    telegram_per_link = {}
+    whatsapp_per_link = {}
 
-    headers = ["Post_ID", "Time", "Views", "Full_Text", "Links_Count", "Links"]
-    date_groups = group_posts_by_date(posts)
-    print(f"📅 Posts grouped into {len(date_groups)} date groups: {list(date_groups.keys())}")
-
-    total_saved = 0
-    created_sheets = []
-
-    for date_str, date_posts in date_groups.items():
-        print(f"📝 Processing {len(date_posts)} posts for date: {date_str}")
-
-        # ✅ Pass scheduled flag here so the sheet name is correct
-        ws = create_channel_date_worksheet(channel_name, date_str, headers, scheduled=scheduled)
-
-        if not ws:
-            print(f"❌ Failed to create worksheet for {channel_name} - {date_str}")
-            continue
-
-        rows = []
-        for post in date_posts:
-            post_datetime = datetime.strptime(post["time"], "%Y-%m-%d %H:%M:%S")
-            time_only = post_datetime.strftime("%I:%M %p")
-
-            full_text = post.get("text", "")
-            links = post.get("links", [])
-            links_count = len(links)
-            links_str = ", ".join(links) if links else ""
-
-            rows.append([
-                post["id"],
-                time_only,
-                post.get("views", "N/A"),
-                full_text,
-                links_count,
-                links_str
-            ])
+    for link in links:
+        print(f"Fetching clicks for {link}")
+        normalized_link = link.replace("http://", "").replace("https://", "")
+        print(f"⚠️ Fetching clicks for {normalized_link}")
+        headers = {"X-API-KEY": API_KEY, "Content-Type": "application/json"}
+        payload = {"shortened_url": normalized_link, "date": date_str}
+        print(f"Payload {payload}")
 
         try:
-            if rows:
-                ws.append_rows(rows)
-                total_saved += len(rows)
-                created_sheets.append(date_str)
-                print(f"✅ Saved {len(rows)} posts to {date_str} {'(Scheduled)' if scheduled else ''}")
-            else:
-                print(f"⚠️ No rows to save for {date_str}")
+            response = requests.post(API_URL, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()  
+            print(f"Response {data}")
         except Exception as e:
-            print(f"❌ Error saving to {date_str}: {e}")
+            print(f"⚠️ Error fetching clicks for {normalized_link}: {e}")
+            continue
 
-    if created_sheets:
-        sheets_list = ", ".join(created_sheets)
-        return f"✅ Saved {total_saved} posts across {len(created_sheets)} sheets: {sheets_list}"
-    else:
-        return "❌ No sheets were created or updated"
+        for item in data:
+            acc = item.get("account")
+            clicks = item.get("clicks", 0)
+            shortened_url = item.get("shortened_url", normalized_link)
+
+            if acc == "telegram":
+                telegram_total += clicks
+                telegram_per_link[shortened_url] = clicks
+            elif acc == "whatsapp":
+                whatsapp_total += clicks
+                whatsapp_per_link[shortened_url] = clicks
+
+    return {
+        "telegram_clicks": telegram_total,
+        "whatsapp_clicks": whatsapp_total,
+        "telegram_clicks_per_link": telegram_per_link,
+        "whatsapp_clicks_per_link": whatsapp_per_link
+    }
+
+
+def save_posts_to_channel_date_sheets(posts: list, channel: str, scheduled: bool = False):
+    """
+    Save posts to Google Sheets per channel and date, including click data.
+    Each link and its clicks are recorded in separate columns.
+    """
+    if not posts:
+        return "No posts to save."
+
+    sheet_id = get_channel_sheet_id(channel)
+    sh = gc.open_by_key(sheet_id)
+
+    headers = ["Post Number", "Category", "Time", "Status", "Message", "Channel",
+               "Links", "Telegram Clicks", "WhatsApp Clicks"]
+
+    for post_num, post in enumerate(posts, start=1):
+        # Get message text
+        post_text = post.get("text") or post.get("message") or ""
+        
+        # Get category
+        category = post.get("category") or post.get("category_name") or ""
+        
+        # Get post time
+        post_time = post.get("time") or post.get("custom_time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        date_only = post_time.split(" ")[0]
+        
+        # Extract links if not present
+        links = post.get("links") or extract_links(post_text)
+        
+        # Get click data
+        click_data = get_click_data_for_links(links, date_only)
+        
+        telegram_clicks_str = ", ".join([f"{l} ({c})" for l, c in click_data["telegram_clicks_per_link"].items()])
+        whatsapp_clicks_str = ", ".join([f"{l} ({c})" for l, c in click_data["whatsapp_clicks_per_link"].items()])
+        
+        # Create or get worksheet
+        post_date_str = datetime.strptime(date_only, "%Y-%m-%d").strftime("%d_%b_%Y")
+        ws = create_channel_date_worksheet(channel, post_date_str, headers, scheduled)
+        if not ws:
+            print(f"❌ Unable to get worksheet for {channel} {post_date_str}")
+            continue
+        
+        # Determine next empty row
+        next_row = len(ws.get_all_values()) + 1
+        
+        # Build row
+        row_data = [
+            post_num,
+            category,
+            post_time,
+            post.get("status", "Live"),
+            post_text,
+            channel,
+            ", ".join(links),
+            telegram_clicks_str,
+            whatsapp_clicks_str
+        ]
+        
+        ws.insert_row(row_data, next_row)
+        print(f"✅ Post {post_num} saved to {channel} sheet '{ws.title}'")
+
+
+    return f"✅ {len(posts)} posts saved to {channel} sheet."
+
+# Alternative helper function to separate links by platform
+def categorize_links_by_platform(links):
+    """
+    Categorize links based on their domain
+    Returns dict with telegram_links and whatsapp_links
+    """
+    telegram_links = []
+    whatsapp_links = []
+    
+    for link in links:
+        link_lower = link.lower()
+        # You can customize these patterns based on your link structure
+        if 'amzaff.in' in link_lower:
+            # Telegram links typically use .in domain
+            telegram_links.append(link)
+        elif 'amzaff.to' in link_lower:
+            # WhatsApp links typically use .to domain
+            whatsapp_links.append(link)
+        else:
+            # Default: add to both or handle based on your logic
+            telegram_links.append(link)
+    
+    return {
+        "telegram_links": telegram_links,
+        "whatsapp_links": whatsapp_links
+    }

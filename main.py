@@ -1,5 +1,5 @@
 # main.py
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Form, Request,Query
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Form, Request, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,7 +7,7 @@ import os, re, json
 from typing import List
 from datetime import date, datetime, timezone,timedelta
 from logs_api import router as logs_router
-from telegram_utils import CHANNELS, extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet,initialize_google_sheets,sheets_available,api_id, api_hash, session_string,save_posts_to_channel_date_sheets
+from telegram_utils import CHANNELS, extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet,initialize_google_sheets,sheets_available,api_id, api_hash, session_string,save_posts_to_channel_date_sheets,get_click_data_for_links
 import pandas as pd
 import pytz
 from pydantic import BaseModel
@@ -18,7 +18,8 @@ from telethon.sessions import StringSession
 from telethon.tl.functions.messages import GetScheduledHistoryRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.types import InputPeerChannel
-
+from dateutil import parser
+from clicksFind import get_clicks
 ist = pytz.timezone("Asia/Kolkata")
 
 
@@ -42,6 +43,27 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 app.include_router(logs_router, prefix="/api")
+
+@app.post("/api/sheets/connect-or-check")
+async def connect_or_check(request: Request):
+    global sheets_available
+    body = await request.json()
+    reconnect = body.get("reconnect", False)
+
+    if reconnect or not sheets_available:
+        # Attempt to reconnect
+        success = initialize_google_sheets()
+        sheets_available = success
+        return {
+            "connected": success,
+            "message": "✅ Connected to Google Sheets" if success else "❌ Failed to connect Google Sheets"
+        }
+    else:
+        # Just return current status
+        return {
+            "connected": sheets_available,
+            "message": "✅ Google Sheets connected" if sheets_available else "❌ Google Sheets not connected"
+        }
 
 def to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
@@ -115,6 +137,7 @@ def parse_custom_time(time_str: str, base_date: datetime) -> datetime:
         return None
 
 
+
 # Add this parameter to the function signature
 @app.post("/api/auto-schedule")
 async def auto_schedule(
@@ -124,14 +147,13 @@ async def auto_schedule(
     image_files: List[UploadFile] = File([]),
     start_time: str = Form(...),
     end_time: str = Form(...),
-    times: List[str] = Form(default=[]),
-    channels: str = Form(...),  # Add this line
+    channels: str = Form(...),
     send_image_only: bool = Form(default=False),
     interval_minutes: int = Form(default=0),
     scheduling_mode: str = Form(default="auto")
 ):
-    # Add this right after the try: statement
     try:
+
         # Parse selected channels
         selected_channels = json.loads(channels) if channels else []
         if not selected_channels:
@@ -155,9 +177,9 @@ async def auto_schedule(
             with open(filepath, 'r', encoding='utf-8') as f:
                 text = f.read()
                 text_contents.append(text)
-
-        # Extract posts from text
+        
         text_posts = extract_all_posts_from_texts(text_contents)
+
         print(f"📝 Extracted {len(text_posts)} posts from text files")
 
         # Save and process image files
@@ -177,6 +199,7 @@ async def auto_schedule(
         all_post_nums = sorted(set(text_posts.keys()) | set(image_map.keys()))
         image_only_posts = [num for num in image_map if num not in text_posts]
 
+
         if image_only_posts and not send_image_only:
             return JSONResponse({
                 "status": "confirm_image_only",
@@ -187,8 +210,9 @@ async def auto_schedule(
             return JSONResponse(status_code=400, content={"error": "No valid posts detected."})
 
         # Parse start and end date-times
-        start_dt = round_to_nearest_5(ist.localize(datetime.fromisoformat(start_time)))
-        end_dt = round_to_nearest_5(ist.localize(datetime.fromisoformat(end_time)))
+        start_dt = round_to_nearest_5(ist.localize(datetime.fromisoformat(start_time.replace("Z", ""))))
+        end_dt = round_to_nearest_5(ist.localize(parser.isoparse(end_time)))
+
 
         # Get blocked times from Google Sheet (these are naive datetime objects)
         sheet_blocked_times_naive = get_blocked_times_from_sheet(selected_channels)
@@ -197,7 +221,11 @@ async def auto_schedule(
         blocked_times_ist = set()
         for naive_dt in sheet_blocked_times_naive:
             # Assume sheet times are in IST and make them timezone-aware
-            ist_dt = ist.localize(naive_dt)
+            if naive_dt.tzinfo is None:
+                ist_dt = ist.localize(naive_dt)
+            else:
+                ist_dt = naive_dt.astimezone(ist)
+
             # Round to nearest 5 minutes to match our grid
             rounded_dt = round_to_nearest_5(ist_dt)
             blocked_times_ist.add(rounded_dt)
@@ -231,7 +259,12 @@ async def auto_schedule(
                     try:
                         post_num = int(post_str.strip())
                         full_time = f"{start_dt.date()}T{time_str.strip()}"
-                        dt_time = ist.localize(round_to_nearest_5(datetime.fromisoformat(full_time)))
+                        dt_time = parse_custom_time(time_str.strip(), start_dt)
+                        if not dt_time:
+                            print(f"⚠️ Could not parse custom time: {time_str}")
+                            continue
+                        dt_time = round_to_nearest_5(ist.localize(dt_time)) if dt_time.tzinfo is None else dt_time
+
 
                         # Ensure custom time is on the same date as the selected date
                         if dt_time.date() != start_dt.date():
@@ -388,6 +421,8 @@ async def auto_schedule(
                     continue
 
                 # Schedule the post
+                if not scheduled_time:
+                    continue
                 schedule_time = to_utc_naive(scheduled_time)
                 try:
                     await send_telegram_message(
@@ -444,36 +479,12 @@ async def auto_schedule(
         print(f"Error in /api/auto-schedule: {e}")
         return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
-@app.post("/api/sheets/connect-or-check")
-async def connect_or_check(request: Request):
-    global sheets_available
-    body = await request.json()
-    reconnect = body.get("reconnect", False)
 
-    if reconnect or not sheets_available:
-        # Attempt to reconnect
-        success = initialize_google_sheets()
-        sheets_available = success
-        return {
-            "connected": success,
-            "message": "✅ Connected to Google Sheets" if success else "❌ Failed to connect Google Sheets"
-        }
-    else:
-        # Just return current status
-        return {
-            "connected": sheets_available,
-            "message": "✅ Google Sheets connected" if sheets_available else "❌ Google Sheets not connected"
-        }
-        
-
-
-# Request Model
 class ReadPostsRequest(BaseModel):
     channel: str
     start_time: datetime
     end_time: datetime
 
-# Utility: Extract links
 def extract_links(text: str):
     if not text:
         return []
@@ -481,45 +492,20 @@ def extract_links(text: str):
     links = url_pattern.findall(text)
     return [str(l).strip() for l in links if l]
 
-# Utility: Save to gsheet
-def save_to_excel(posts, filename="posts.xlsx"):
-    import openpyxl
-    from openpyxl.styles import Alignment
+def normalize_post(post_info):
+    """Ensure all required keys exist for save_posts_to_channel_date_sheets"""
+    text_content = post_info.get("text") or post_info.get("Full_Text") or "📸 Image post"
+    links = post_info.get("links") or post_info.get("Links") or extract_links(text_content)
+    return {
+        "text": text_content,
+        "category": post_info.get("category") or "",
+        "time": post_info.get("time"),
+        "status": post_info.get("status") or "Live",
+        "links": links,
+        "Telegram-clicks": post_info.get("Telegram-clicks", 0),
+        "Whatsapp-clicks": post_info.get("Whatsapp-clicks", 0),
+    }
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Posts"
-
-    headers = ["Post ID", "Date & Time (IST)", "Views", "Text", "Links"]
-    ws.append(headers)
-
-    for post in posts:
-        # Human readable IST time
-        time_str = datetime.strptime(
-            post['time'], "%Y-%m-%d %H:%M:%S"
-        ).strftime("%d %b %Y, %I:%M %p")
-
-        # Links: comma + space separated instead of new line
-        links_str = ", ".join(post["links"]) if post["links"] else ""
-
-        ws.append([
-            post["id"],
-            time_str + " IST",
-            post["views"],
-            post["text"],
-            # post["image"],
-            links_str
-        ])
-
-    # Autofit and wrap text
-    for col in ws.columns:
-        for cell in col:
-            cell.alignment = Alignment(wrap_text=True, vertical="top")
-
-    wb.save(filename)
-    return filename
-
-# API: Read Posts
 @app.post("/api/read-posts")
 async def read_posts(req: ReadPostsRequest):
     posts_data = []
@@ -530,7 +516,6 @@ async def read_posts(req: ReadPostsRequest):
         async for msg in client.iter_messages(req.channel, offset_date=end_time_utc):
             if msg.date is None:
                 continue
-
             msg_date_utc = msg.date.replace(tzinfo=pytz.UTC)
             if not (start_time_utc <= msg_date_utc <= end_time_utc):
                 continue
@@ -539,24 +524,25 @@ async def read_posts(req: ReadPostsRequest):
             text_content = msg.text if msg.text else ""
             links = extract_links(text_content)
 
+            # Get click data
+            post_date_str = msg_date_ist.strftime("%Y-%m-%d")
+            click_data = get_click_data_for_links(links, post_date_str)
+
             post_info = {
                 "id": msg.id,
                 "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S"),
-                "views": msg.views if hasattr(msg, "views") else 0,
-                "text": text_content,
+                "Telegram-Views": msg.views if hasattr(msg, "views") else 0,
+                "Whatsapp-Views": 0,
+                "Telegram-clicks": click_data["telegram_clicks"],
+                "Whatsapp-clicks": click_data["whatsapp_clicks"],
+                "text": text_content if text_content.strip() else "📸 Image post (no text or links)",
                 "links": links,
-                "channel": req.channel,
-                "media_type": "image" if msg.media else "text"
+                "category": "",
             }
 
-            if msg.media and not text_content.strip() and not links:
-                post_info["text"] = "📸 Image post (no text or links)"
+            posts_data.append(normalize_post(post_info))
 
-            posts_data.append(post_info)
-
-    # ✅ FIXED: pass posts_data instead of undefined 'posts'
     save_msg = save_posts_to_channel_date_sheets(posts_data, req.channel, scheduled=False)
-
     return {
         "status": "success",
         "count": len(posts_data),
@@ -574,31 +560,29 @@ async def read_scheduled_messages(req: ReadPostsRequest):
     scheduled_posts = []
 
     async with TelegramClient(StringSession(session_string), api_id, api_hash) as client:
-        # Fetch scheduled (unsent) messages
         result = await client(GetScheduledHistoryRequest(peer=req.channel, hash=0))
-
         for msg in result.messages:
-            # Convert scheduled time to IST
-            if msg.date:
-                msg_date_ist = msg.date.astimezone(pytz.timezone("Asia/Kolkata"))
-            else:
-                msg_date_ist = None
-
+            msg_date_ist = msg.date.astimezone(pytz.timezone("Asia/Kolkata")) if msg.date else datetime.now().astimezone(pytz.timezone("Asia/Kolkata"))
             text_content = msg.message or ""
             links = extract_links(text_content)
 
-            scheduled_posts.append({
+            post_date_str = msg_date_ist.strftime("%Y-%m-%d")
+            click_data = get_click_data_for_links(links, post_date_str)
+
+            post_info = {
                 "id": msg.id,
-                "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S") if msg_date_ist else "N/A",
-                "text": text_content,
+                "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S"),
+                "text": text_content if text_content.strip() else "📸 Image post (no text or links)",
                 "links": links,
-                "has_media": True if msg.media else False,
-                "channel": req.channel
-            })
+                "category": "",
+                "status": "Scheduled",
+                "Telegram-clicks": click_data["telegram_clicks"],
+                "Whatsapp-clicks": click_data["whatsapp_clicks"],
+            }
 
-    # Save scheduled posts to Google Sheet (new worksheet named "DD Mon YYYY - Scheduled Posts")
+            scheduled_posts.append(normalize_post(post_info))
+
     save_msg = save_posts_to_channel_date_sheets(scheduled_posts, req.channel, scheduled=True)
-
     return {
         "status": "success",
         "count": len(scheduled_posts),
@@ -611,16 +595,9 @@ async def get_posts_summary(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     channels: str = Query(None, description="Comma-separated channel IDs")
 ):
-    """
-    Get live and scheduled post counts for a specific date.
-    Returns channel-wise breakdown with totals for that day only.
-    
-    Example: /api/posts-summary?date=2025-09-29&channels=1,2,3
-    """
     results = []
     
     try:
-        # Parse the date and make it timezone-aware (UTC)
         target_date = datetime.strptime(date, "%Y-%m-%d")
         start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc)
         end_of_day = target_date.replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc)
@@ -632,7 +609,6 @@ async def get_posts_summary(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     
-    # Filter channels if specified
     target_channels = CHANNELS
     if channels:
         channel_ids = [id.strip() for id in channels.split(",")]
@@ -644,34 +620,27 @@ async def get_posts_summary(
             try:
                 entity = await client.get_entity(username)
                 
-                # Count LIVE posts for this specific date
                 live_count = 0
-                
-                # Get all messages from the channel for the specific date
                 messages_found = []
                 async for message in client.iter_messages(
                     entity,
-                    limit=None,  # Get all messages
-                    reverse=False  # Start from newest
+                    limit=None,
+                    reverse=False
                 ):
-                    # Convert message date to UTC if it's not already
                     msg_date = message.date
                     if msg_date.tzinfo is None:
                         msg_date = msg_date.replace(tzinfo=timezone.utc)
                     elif msg_date.tzinfo != timezone.utc:
                         msg_date = msg_date.astimezone(timezone.utc)
                     
-                    # Check if message is within our target date range
                     if msg_date >= start_of_day and msg_date <= end_of_day:
                         messages_found.append(message)
                         live_count += 1
                     elif msg_date < start_of_day:
-                        # We've gone past our target date, stop searching
                         break
                 
                 print(f"📊 Found {live_count} live messages for @{username} on {date}")
                 
-                # Count SCHEDULED posts for this specific date
                 scheduled_count = 0
                 try:
                     scheduled_result = await client(
@@ -680,7 +649,6 @@ async def get_posts_summary(
                     
                     if hasattr(scheduled_result, 'messages'):
                         for msg in scheduled_result.messages:
-                            # Convert scheduled message date to UTC
                             sched_date = msg.date
                             if sched_date.tzinfo is None:
                                 sched_date = sched_date.replace(tzinfo=timezone.utc)
@@ -694,7 +662,6 @@ async def get_posts_summary(
                     
                 except Exception as sched_err:
                     print(f"⚠️ Could not fetch scheduled posts for @{username}: {sched_err}")
-                    # Continue with scheduled_count = 0
                 
                 results.append({
                     "channel_id": channel_id,
@@ -715,7 +682,6 @@ async def get_posts_summary(
                     "error": str(e)
                 })
     
-    # Calculate totals
     total_live = sum(ch.get("live_posts", 0) for ch in results)
     total_scheduled = sum(ch.get("scheduled_posts", 0) for ch in results)
     
@@ -731,12 +697,8 @@ async def get_posts_summary(
         }
     }
 
-
 @app.get("/api/channels")
 async def get_available_channels():
-    """
-    Get list of available channels for selection
-    """
     channels_list = []
     for channel_id, data in CHANNELS.items():
         channels_list.append({
@@ -750,7 +712,6 @@ async def get_available_channels():
         "channels": channels_list,
         "total": len(channels_list)
     }
-
 
 @app.get("/api/posts-range")
 async def get_posts_range(
@@ -868,6 +829,40 @@ async def get_posts_range(
             "total_posts": total_live + total_scheduled
         }
     }
+
+def save_to_excel(posts, filename="posts.xlsx"):
+    import openpyxl
+    from openpyxl.styles import Alignment
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Posts"
+
+    headers = ["Post ID", "Date & Time (IST)", "Views", "Text", "Links"]
+    ws.append(headers)
+
+    for post in posts:
+        time_str = datetime.strptime(
+            post['time'], "%Y-%m-%d %H:%M:%S"
+        ).strftime("%d %b %Y, %I:%M %p")
+
+        links_str = ", ".join(post["links"]) if post["links"] else ""
+
+        ws.append([
+            post["id"],
+            time_str + " IST",
+            post["views"],
+            post["text"],
+            # post["image"],
+            links_str
+        ])
+
+    for col in ws.columns:
+        for cell in col:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+    wb.save(filename)
+    return filename
 
 
 @app.get("/api/calendar-slots")

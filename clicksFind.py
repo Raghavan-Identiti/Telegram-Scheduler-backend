@@ -29,10 +29,8 @@ def get_clicks(shortened_url: str, date: str) -> Any:
         return None
 
 # if __name__ == "__main__":
-#     urls: List[str] = [
-#         "http://amzaff.in/mFKkfcZ",
-#     ]
-#     date = "2025-09-29"  
+#     urls: List[str] = ["amzaff.in/sd53Qad", "amzaff.in/JTGc9BA", "amzaff.in/OhzaLRb", "amzaff.in/5n8NsAL", "amzaff.in/nKeZSmA", "amzaff.in/gfJUZIa", "amzaff.in/eg7nNUt", "amzaff.in/1w2ZEzB", "amzaff.in/ezwO9pw", "amzaff.in/jnYCmVE", "amzaff.in/czPBQoJ", "amzaff.in/neZvUY8", "amzaff.in/urDQgzB"]
+#     date = "2025-09-26"  
 
 #     for url in urls:
 #         clicks_data = get_clicks(url, date)

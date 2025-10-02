@@ -488,9 +488,12 @@ class ReadPostsRequest(BaseModel):
 def extract_links(text: str):
     if not text:
         return []
-    url_pattern = re.compile(r"(https?://\S+|amzaff\.in/\S+)")
+    # Regex to match http links or amzaff.in links, even if surrounded by * or ** 
+    url_pattern = re.compile(r"[*_()<>]*\b(https?://\S+|amzaff\.in/\S+)\b[*_()<>]*")
     links = url_pattern.findall(text)
-    return [str(l).strip() for l in links if l]
+    # Clean up any trailing punctuation or markdown symbols
+    cleaned_links = [re.sub(r"^[*_()<>]+|[*_()<>.,!?]+$", "", link).strip() for link in links]
+    return cleaned_links
 
 def normalize_post(post_info):
     """Ensure all required keys exist for save_posts_to_channel_date_sheets"""
@@ -505,6 +508,8 @@ def normalize_post(post_info):
         "Telegram-clicks": post_info.get("Telegram-clicks", 0),
         "Whatsapp-clicks": post_info.get("Whatsapp-clicks", 0),
     }
+
+# main.py - Updated to include Views in the current flow
 
 @app.post("/api/read-posts")
 async def read_posts(req: ReadPostsRequest):
@@ -531,16 +536,21 @@ async def read_posts(req: ReadPostsRequest):
             post_info = {
                 "id": msg.id,
                 "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S"),
-                "Telegram-Views": msg.views if hasattr(msg, "views") else 0,
-                "Whatsapp-Views": 0,
+                "views": msg.views if hasattr(msg, "views") and msg.views else 0,
                 "Telegram-clicks": click_data["telegram_clicks"],
                 "Whatsapp-clicks": click_data["whatsapp_clicks"],
-                "text": text_content if text_content.strip() else "📸 Image post (no text or links)",
+                "text": text_content,
                 "links": links,
+                "channel": req.channel,
                 "category": "",
+                "status": "Live",
+                "media_type": "image" if msg.media else "text"
             }
 
-            posts_data.append(normalize_post(post_info))
+            if msg.media and not text_content.strip() and not links:
+                post_info["text"] = "📸 Image post (no text or links)"
+
+            posts_data.append(post_info)
 
     save_msg = save_posts_to_channel_date_sheets(posts_data, req.channel, scheduled=False)
     return {
@@ -572,15 +582,17 @@ async def read_scheduled_messages(req: ReadPostsRequest):
             post_info = {
                 "id": msg.id,
                 "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S"),
+                "views": 0,  # Scheduled posts don't have views yet
                 "text": text_content if text_content.strip() else "📸 Image post (no text or links)",
                 "links": links,
+                "channel": req.channel,
                 "category": "",
                 "status": "Scheduled",
                 "Telegram-clicks": click_data["telegram_clicks"],
                 "Whatsapp-clicks": click_data["whatsapp_clicks"],
             }
 
-            scheduled_posts.append(normalize_post(post_info))
+            scheduled_posts.append(post_info)
 
     save_msg = save_posts_to_channel_date_sheets(scheduled_posts, req.channel, scheduled=True)
     return {
@@ -589,7 +601,6 @@ async def read_scheduled_messages(req: ReadPostsRequest):
         "message": save_msg,
         "scheduled_posts": scheduled_posts
     }
-
 @app.get("/api/posts-summary")
 async def get_posts_summary(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),

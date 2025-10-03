@@ -42,6 +42,10 @@ CHANNELS = {
     'Amazon_Associates_Consumables': {
         'username': 'Amazon_Associates_Consumables',
         'sheet_name': 'Consumables'
+    },
+    'amazoninfluencerprogramindia': {
+        'username': 'amazoninfluencerprogramindia',
+        'sheet_name': 'Amazon Influencer Program India'
     }
 }
 
@@ -828,7 +832,8 @@ def get_channel_sheet_id(channel_name: str):
         'amazonindiaassociates': '18HviAE73HrRThTlotvUIPWAbRIlIH17MGBUNj4-2Hgw',
         'Amazon_Associates_FashionBeauty': '1Nq1R38-uYLVPzdH2yGorG7XVyfLcxVTBEYQUqF7J_sQ', 
         'Amazon_Associates_HomeKitchen': '12vjND6MPAXR_5heIdBqUaGOf4VVvUQvONRkLwcmE7UA',
-        'Amazon_Associates_Consumables': '1smDQFHgQ0HT2_R8nKFgY527wqbdFUuyeHLbL6zWgmk0'
+        'Amazon_Associates_Consumables': '1smDQFHgQ0HT2_R8nKFgY527wqbdFUuyeHLbL6zWgmk0',
+        'amazoninfluencerprogramindia' : '1hAjWDjh1jbA5gUGGMF83MUcmiARrKThx4DJ_zNUxQHg'
     }
     
     sheet_id = CHANNEL_SHEETS.get(clean_channel_name, None)
@@ -893,12 +898,12 @@ import requests
 
 API_URL = os.getenv("LINK_CLICKS_API")
 API_KEY = "f073c95a0227414d8e053fdfa19ece0dbe29ea9a8b3fb08e2c8186fabce64bb4"
-# telegram_utils.py - Updated with separate link columns and better formatting
 
+# telegram_utils.py - Updated with separate link columns and better formatting
 def get_click_data_for_links(links, date_str):
     """
     Return total clicks and per-link clicks for Telegram and WhatsApp.
-    Sums all clicks from all links in a post.
+    Sums all clicks from all unique links in a post.
     """
     telegram_total = 0
     whatsapp_total = 0
@@ -907,7 +912,10 @@ def get_click_data_for_links(links, date_str):
     telegram_links = []
     whatsapp_links = []
 
-    for link in links:
+    # Ensure links are unique
+    unique_links = list(set(links))
+
+    for link in unique_links:
         normalized_link = link.replace("http://", "").replace("https://", "")
         headers = {"X-API-KEY": API_KEY, "Content-Type": "application/json"}
         payload = {"shortened_url": normalized_link, "date": date_str}
@@ -939,14 +947,13 @@ def get_click_data_for_links(links, date_str):
                     whatsapp_links.append(shortened_url)
 
     return {
-        "telegram_clicks": telegram_total,             # ✅ total Telegram clicks
-        "whatsapp_clicks": whatsapp_total,             # ✅ total WhatsApp clicks
+        "telegram_clicks": telegram_total,
+        "whatsapp_clicks": whatsapp_total,
         "telegram_clicks_per_link": telegram_per_link,
         "whatsapp_clicks_per_link": whatsapp_per_link,
         "telegram_links": telegram_links,
         "whatsapp_links": whatsapp_links
     }
-
 
 def save_posts_to_channel_date_sheets(posts: list, channel: str, scheduled: bool = False):
     """

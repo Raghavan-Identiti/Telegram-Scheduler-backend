@@ -8,7 +8,7 @@ from telethon.sessions import StringSession
 from datetime import datetime, timezone, timedelta
 import re
 from typing import Dict, List
-from telegram_scheduler import TelegramScheduler
+# from telegram_scheduler import TelegramScheduler
 from telethon.tl.functions.messages import SendMessageRequest, SendMediaRequest
 from telethon.tl.types import InputPeerChannel, InputMediaUploadedPhoto, InputMediaUploadedDocument
 import gspread
@@ -113,7 +113,7 @@ phone = os.getenv("TELEGRAM_PHONE_NUMBER")
 session_string = os.getenv("TELETHON_SESSION")
 
 client = TelegramClient(StringSession(session_string), api_id, api_hash)
-scheduler = TelegramScheduler()
+# scheduler = TelegramScheduler()
 
 
 def check_caption_length(text: str) -> Dict[str, any]:
@@ -893,7 +893,6 @@ def create_channel_date_worksheet(channel_name: str, date_str: str, headers: Lis
 
 # Add this to your existing telegram_utils.py file
 # This shows the updated save_posts_to_channel_date_sheets function
-import os
 import requests
 
 API_URL = os.getenv("LINK_CLICKS_API")

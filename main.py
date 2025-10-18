@@ -19,7 +19,7 @@ from telethon.tl.functions.messages import GetScheduledHistoryRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.types import InputPeerChannel
 from dateutil import parser
-from clicksFind import get_clicks
+from recurrence_scheduler import router as recurrence_router
 ist = pytz.timezone("Asia/Kolkata")
 
 
@@ -43,6 +43,7 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 app.include_router(logs_router, prefix="/api")
+app.include_router(recurrence_router, prefix="/api")
 
 @app.post("/api/sheets/connect-or-check")
 async def connect_or_check(request: Request):

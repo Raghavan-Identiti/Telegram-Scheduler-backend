@@ -1,6 +1,8 @@
 # telegram_utils.py
 import os
 import json
+import time
+from functools import wraps
 import pandas as pd
 from dotenv import load_dotenv
 from telethon.sync import TelegramClient
@@ -58,6 +60,27 @@ MAX_CAPTION_LENGTH = 1024  # Telegram's actual limit
 MAX_TEXT_LENGTH = 4096      # Telegram's message limit
 CAPTION_SAFETY_BUFFER = 50
 MESSAGE_DELAY_MINUTES = 3
+GSHEET_RETRIES = 3
+GSHEET_RETRY_DELAY = 2
+
+def retry_gsheet(func):
+    """Decorator to retry Google Sheets operations on transient errors (503, 429)"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        last_error = None
+        for i in range(GSHEET_RETRIES):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                err_msg = str(e)
+                if "503" in err_msg or "429" in err_msg or "Service Unavailable" in err_msg:
+                    print(f"⚠️ Google Sheets transient error ({err_msg}). Retrying {i+1}/{GSHEET_RETRIES} in {GSHEET_RETRY_DELAY}s...")
+                    time.sleep(GSHEET_RETRY_DELAY)
+                    last_error = e
+                else:
+                    raise e
+        raise last_error
+    return wrapper
 
 def initialize_google_sheets():
     """Initialize Google Sheets connection securely without local service_account.json"""
@@ -419,7 +442,6 @@ def append_row_to_sheet(values):
                 return False
             
             # Wait before retry
-            import time
             time.sleep(2 ** attempt)  # Exponential backoff
     
     return False
@@ -501,7 +523,6 @@ def append_row_to_sheet_channel(channel_sheet, values):
                 return False
             
             # Wait before retry
-            import time
             time.sleep(2 ** attempt)  # Exponential backoff
     
     return False
@@ -674,9 +695,7 @@ async def send_telegram_message(image_path: str, post_text: str, post_number: in
                 # Log both separately
                 log_post_status_gsheet(post_number, category, "✅ Scheduled (Image only)", schedule_time, "", channel_id)
                 log_post_status_gsheet(f"{post_number}-text", category, "✅ Scheduled (Text)", text_schedule_time, message, channel_id)
-                log_post_status_gsheet(post_number, category, "⚠️ No Content", schedule_time, "No text or image provided", channel_id)
-                log_post_status_gsheet(post_number, category, "✅ Scheduled", schedule_time, message, channel_id)
-                log_post_status_gsheet(post_number, category, f"❌ {error_msg}", schedule_time, message or "", channel_id)
+                return # Prevent redundant logging at the end of function
 
   
         elif media:
@@ -854,7 +873,8 @@ def create_channel_date_worksheet(channel_name: str, date_str: str, headers: Lis
             print("❌ Failed to initialize Google Sheets")
             return None
 
-    try:
+    @retry_gsheet
+    def get_or_create_worksheet():
         # Get the correct sheet ID for this channel
         sheet_id = get_channel_sheet_id(channel_name)
         sh = gc.open_by_key(sheet_id)
@@ -884,6 +904,8 @@ def create_channel_date_worksheet(channel_name: str, date_str: str, headers: Lis
             print(f"✅ Created new worksheet: '{worksheet_name}'")
             return ws
 
+    try:
+        return get_or_create_worksheet()
     except Exception as e:
         print(f"❌ Worksheet creation error for {channel_name}: {e}")
         return None
@@ -970,66 +992,79 @@ def save_posts_to_channel_date_sheets(posts: list, channel: str, scheduled: bool
     headers = ["Post Number", "Category", "Time", "Status", "Message", 
                "Telegram Links", "WhatsApp Links", "Views", "Telegram Clicks", "WhatsApp Clicks"]
 
-    # Get the worksheet for first post's date
-    first_post_time = posts[0].get("time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    date_only = first_post_time.split(" ")[0]
-    post_date_str = datetime.strptime(date_only, "%Y-%m-%d").strftime("%d_%b_%Y")
-    ws = create_channel_date_worksheet(channel, post_date_str, headers, scheduled)
-    if not ws:
-        return f"❌ Unable to get worksheet for {channel} {post_date_str}"
-
-    # Prepare all rows at once
-    all_rows = []
+    # Group posts by date
+    grouped_posts = group_posts_by_date(posts)
     
-    for idx, post in enumerate(posts, start=1):
-        post_text = post.get("text") or post.get("message") or ""
-        category = post.get("category") or post.get("category_name") or ""
-        post_time = post.get("time") or post.get("custom_time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        date_only = post_time.split(" ")[0]
+    total_saved = 0
+    for post_date_str, date_posts in grouped_posts.items():
+        ws = create_channel_date_worksheet(channel, post_date_str, headers, scheduled)
+        if not ws:
+            print(f"❌ Unable to get worksheet for {channel} {post_date_str}")
+            continue
 
-        # Extract time only in human-readable format (e.g., "02:30 PM")
-        try:
-            time_obj = datetime.strptime(post_time, "%Y-%m-%d %H:%M:%S")
-            time_only = time_obj.strftime("%I:%M %p")  # 02:30 PM format
-        except:
-            time_only = post_time.split(" ")[1] if " " in post_time else post_time
-
-        links = post.get("links") or extract_links(post_text)
-        click_data = get_click_data_for_links(links, date_only)
-
-        telegram_clicks_total = click_data.get("telegram_clicks", 0)
-        whatsapp_clicks_total = click_data.get("whatsapp_clicks", 0)
-        telegram_links = click_data.get("telegram_links", [])
-        whatsapp_links = click_data.get("whatsapp_links", [])
+        # Prepare all rows at once
+        all_rows = []
         
-        # Get views data (single views field from Telegram)
-        views = post.get("views", 0)
+        for idx, post in enumerate(date_posts, start=1):
+            post_text = post.get("text") or post.get("message") or ""
+            category = post.get("category") or post.get("category_name") or ""
+            post_time = post.get("time") or post.get("custom_time") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            date_only = post_time.split(" ")[0]
 
-        row_data = [
-            idx,
-            category,
-            time_only,  # Human-readable time only
-            post.get("status", "Live"),
-            post_text,
-            ", ".join([link for link in telegram_links if link]) if telegram_links else "",
-            ", ".join([link for link in whatsapp_links if link]) if whatsapp_links else "",
-            views,
-            telegram_clicks_total,
-            whatsapp_clicks_total
-        ]
-        
-        all_rows.append(row_data)
+            # Extract time only in human-readable format (e.g., "02:30 PM")
+            try:
+                time_obj = datetime.strptime(post_time, "%Y-%m-%d %H:%M:%S")
+                time_only = time_obj.strftime("%I:%M %p")  # 02:30 PM format
+            except:
+                time_only = post_time.split(" ")[1] if " " in post_time else post_time
 
-    # Single batch append operation instead of multiple insert_row calls
-    if all_rows:
-        try:
-            ws.append_rows(all_rows, value_input_option='USER_ENTERED')
-            print(f"✅ Batch saved {len(all_rows)} posts to {channel} sheet '{ws.title}'")
-        except Exception as e:
-            print(f"❌ Error during batch save: {e}")
-            return f"❌ Failed to save posts: {e}"
+            links = post.get("links") or extract_links(post_text)
+            click_data = get_click_data_for_links(links, date_only)
 
-    return f"✅ {len(posts)} posts saved to {channel} sheet."
+            telegram_clicks_total = click_data.get("telegram_clicks", 0)
+            whatsapp_clicks_total = click_data.get("whatsapp_clicks", 0)
+            telegram_links = click_data.get("telegram_links", [])
+            whatsapp_links = click_data.get("whatsapp_links", [])
+            
+            # Get views data (single views field from Telegram)
+            views = post.get("views", 0)
+
+            row_data = [
+                idx,
+                category,
+                time_only,  # Human-readable time only
+                post.get("status", "Live"),
+                post_text,
+                ", ".join([link for link in telegram_links if link]) if telegram_links else "",
+                ", ".join([link for link in whatsapp_links if link]) if whatsapp_links else "",
+                views,
+                telegram_clicks_total,
+                whatsapp_clicks_total
+            ]
+            
+            all_rows.append(row_data)
+
+        # Single batch append operation instead of multiple insert_row calls
+        if all_rows:
+            try:
+                @retry_gsheet
+                def do_append():
+                    ws.append_rows(all_rows, value_input_option='USER_ENTERED')
+                
+                do_append()
+                print(f"✅ Batch saved {len(all_rows)} posts to {channel} sheet '{ws.title}'")
+                total_saved += len(all_rows)
+                
+                # Small delay between different dates to avoid hitting quota
+                if len(grouped_posts) > 1:
+                    time.sleep(1)
+                    
+            except Exception as e:
+                print(f"❌ Error during batch save: {e}")
+                # Log error but continue with the next date group
+                pass
+
+    return f"✅ {total_saved} posts saved to {channel} sheets."
 
 # Alternative helper function to separate links by platform
 def categorize_links_by_platform(links):

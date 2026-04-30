@@ -3,8 +3,8 @@ from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Form, Request, Q
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import os, re, json
-from typing import List
+import os, re, json, time
+from typing import List, Dict
 from datetime import date, datetime, timezone,timedelta
 from logs_api import router as logs_router
 from telegram_utils import CHANNELS, extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet,initialize_google_sheets,sheets_available,api_id, api_hash, session_string,save_posts_to_channel_date_sheets,get_click_data_for_links
@@ -20,6 +20,8 @@ from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.types import InputPeerChannel
 from dateutil import parser
 from recurrence_scheduler import router as recurrence_router
+from scheduler import scheduler
+from apscheduler.triggers.cron import CronTrigger
 ist = pytz.timezone("Asia/Kolkata")
 
 
@@ -44,6 +46,114 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 app.include_router(logs_router, prefix="/api")
 app.include_router(recurrence_router, prefix="/api")
+
+# Settings state for auto-fetch
+SETTINGS_FILE = "settings.json"
+
+def load_settings():
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, "r") as f:
+            return json.load(f)
+    return {"auto_fetch_enabled": False}
+
+def save_settings(settings):
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f)
+
+async def auto_fetch_yesterday_posts():
+    print("⏰ Running daily auto-fetch for yesterday's posts...")
+    today_ist = datetime.now(ist)
+    yesterday_ist = today_ist - timedelta(days=1)
+    
+    start_time_ist = yesterday_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_time_ist = yesterday_ist.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    start_time_utc = start_time_ist.astimezone(pytz.UTC)
+    end_time_utc = end_time_ist.astimezone(pytz.UTC)
+
+    for channel_id, data in CHANNELS.items():
+        channel_username = data["username"]
+        posts_data = []
+        try:
+            async with TelegramClient(StringSession(session_string), api_id, api_hash) as client:
+                async for msg in client.iter_messages(channel_username, offset_date=end_time_utc):
+                    if msg.date is None:
+                        continue
+                    msg_date_utc = msg.date.replace(tzinfo=pytz.UTC)
+                    if not (start_time_utc <= msg_date_utc <= end_time_utc):
+                        continue
+
+                    msg_date_ist = msg_date_utc.astimezone(ist)
+                    text_content = msg.text if msg.text else ""
+                    links = extract_links(text_content)
+
+                    post_date_str = msg_date_ist.strftime("%Y-%m-%d")
+                    click_data = get_click_data_for_links(links, post_date_str)
+
+                    post_info = {
+                        "id": msg.id,
+                        "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S"),
+                        "views": msg.views if hasattr(msg, "views") and msg.views else 0,
+                        "Telegram-clicks": click_data["telegram_clicks"],
+                        "Whatsapp-clicks": click_data["whatsapp_clicks"],
+                        "text": text_content,
+                        "links": links,
+                        "channel": channel_username,
+                        "category": "",
+                        "status": "Live",
+                        "media_type": "image" if msg.media else "text"
+                    }
+
+                    if msg.media and not text_content.strip() and not links:
+                        post_info["text"] = "📸 Image post (no text or links)"
+
+                    posts_data.append(post_info)
+
+            if posts_data:
+                save_msg = save_posts_to_channel_date_sheets(posts_data, channel_username, scheduled=False)
+                print(f"✅ Auto-fetched {len(posts_data)} posts for {channel_username}: {save_msg}")
+            else:
+                print(f"ℹ️ No posts found yesterday for {channel_username}")
+                
+        except Exception as e:
+            print(f"❌ Error auto-fetching for {channel_username}: {e}")
+
+def update_scheduler_job():
+    settings = load_settings()
+    job_id = "daily_auto_fetch"
+    if settings.get("auto_fetch_enabled", False):
+        if not scheduler.get_job(job_id):
+            scheduler.add_job(
+                auto_fetch_yesterday_posts,
+                trigger=CronTrigger(hour=9, minute=0, timezone=ist),
+                id=job_id,
+                replace_existing=True
+            )
+            print("✅ Scheduled daily auto-fetch job at 9:00 AM IST")
+    else:
+        if scheduler.get_job(job_id):
+            scheduler.remove_job(job_id)
+            print("🛑 Removed daily auto-fetch job")
+
+@app.on_event("startup")
+async def startup_event():
+    update_scheduler_job()
+
+class AutoFetchSettings(BaseModel):
+    enabled: bool
+
+@app.get("/api/settings/auto-fetch")
+async def get_auto_fetch():
+    settings = load_settings()
+    return {"enabled": settings.get("auto_fetch_enabled", False)}
+
+@app.post("/api/settings/auto-fetch")
+async def set_auto_fetch(req: AutoFetchSettings):
+    settings = load_settings()
+    settings["auto_fetch_enabled"] = req.enabled
+    save_settings(settings)
+    update_scheduler_job()
+    return {"status": "success", "enabled": req.enabled}
 
 @app.post("/api/sheets/connect-or-check")
 async def connect_or_check(request: Request):
@@ -991,3 +1101,4 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+

@@ -7,3 +7,5 @@ openpyxl
 python-dotenv
 apscheduler
 gspread==6.1.4
+pytz
+requests

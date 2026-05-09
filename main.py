@@ -125,11 +125,11 @@ def update_scheduler_job():
         if not scheduler.get_job(job_id):
             scheduler.add_job(
                 auto_fetch_yesterday_posts,
-                trigger=CronTrigger(hour=9, minute=0, timezone=ist),
+                trigger=CronTrigger(hour=6, minute=0, timezone=ist),
                 id=job_id,
                 replace_existing=True
             )
-            print("✅ Scheduled daily auto-fetch job at 9:00 AM IST")
+            print("✅ Scheduled daily auto-fetch job at 6:00 AM IST")
     else:
         if scheduler.get_job(job_id):
             scheduler.remove_job(job_id)

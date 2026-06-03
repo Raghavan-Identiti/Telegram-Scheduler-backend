@@ -62,6 +62,16 @@ def get_qr_page():
     except Exception as e:
         return HTMLResponse(content=f"Error connecting to WhatsApp service: {e}", status_code=500)
 
+from fastapi.responses import Response
+
+@app.get("/qr-only")
+def get_qr_only():
+    try:
+        resp = requests.get("http://localhost:3001/qr-only", timeout=5.0)
+        return Response(content=resp.content, media_type="application/json", status_code=resp.status_code)
+    except Exception as e:
+        return Response(content='{"error":"Failed"}', media_type="application/json", status_code=500)
+
 # Settings state for auto-fetch
 SETTINGS_FILE = "settings.json"
 

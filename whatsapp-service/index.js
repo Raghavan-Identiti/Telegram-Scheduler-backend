@@ -254,28 +254,58 @@ client.initialize().catch((err) => {
 // QR code serving endpoint
 app.get("/", async (req, res) => {
   if (clientReady) {
-    return res.send(`<h2>✅ WhatsApp is connected and ready!</h2>`);
+    return res.send(
+      `<h2>WhatsApp Web is connected!</h2><p>You can close this window.</p>`,
+    );
   }
-  if (qrString) {
-    try {
-      const qrImage = await qrcode.toDataURL(qrString);
-      return res.send(`
+  if (!qrString) {
+    return res.send(
+      `<h2>Starting WhatsApp Client...</h2><p>Please wait, generating QR Code...</p>
+      <script>setTimeout(() => window.location.reload(), 3000);</script>`,
+    );
+  }
+  try {
+    const qrImage = await qrcode.toDataURL(qrString);
+    res.send(`
         <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
             <h2>Scan this QR code with WhatsApp Linked Devices</h2>
-            <img src="${qrImage}" alt="QR Code" style="width: 300px; height: 300px; border: 1px solid #ccc; border-radius: 10px; padding: 10px;" />
+            <img id="qr-img" src="${qrImage}" alt="QR Code" style="width: 300px; height: 300px; border: 1px solid #ccc; border-radius: 10px; padding: 10px;" />
             <p>Status: Waiting for scan...</p>
             <script>
-                setInterval(() => window.location.reload(), 5000);
+                // Smoothly update QR code without blinking the screen
+                setInterval(async () => {
+                    try {
+                        const response = await fetch('/qr-only');
+                        const data = await response.json();
+                        if (data.ready) {
+                            window.location.reload();
+                        } else if (data.qr) {
+                            document.getElementById('qr-img').src = data.qr;
+                        }
+                    } catch (e) {}
+                }, 5000);
             </script>
         </div>
-      `);
-    } catch (err) {
-      return res.send("Error generating QR code image.");
-    }
+    `);
+  } catch (err) {
+    res.status(500).send("Error generating QR code");
   }
-  return res.send(
-    "<h2>⏳ Initializing WhatsApp client. Please wait...</h2><script>setInterval(() => window.location.reload(), 3000);</script>",
-  );
+});
+
+// New endpoint to fetch just the QR code base64
+app.get("/qr-only", async (req, res) => {
+    if (clientReady) {
+        return res.json({ ready: true });
+    }
+    if (!qrString) {
+        return res.json({ qr: null });
+    }
+    try {
+        const qrImage = await qrcode.toDataURL(qrString);
+        res.json({ qr: qrImage });
+    } catch (e) {
+        res.status(500).json({ error: "Failed" });
+    }
 });
 
 app.get("/status", (req, res) => {

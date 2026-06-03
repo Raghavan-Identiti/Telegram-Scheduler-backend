@@ -51,6 +51,17 @@ app.include_router(logs_router, prefix="/api")
 app.include_router(recurrence_router, prefix="/api")
 app.include_router(whatsapp_router, prefix="/api")
 
+import requests
+from fastapi.responses import HTMLResponse
+
+@app.get("/")
+def get_qr_page():
+    try:
+        resp = requests.get("http://localhost:3001/", timeout=5.0)
+        return HTMLResponse(content=resp.text, status_code=resp.status_code)
+    except Exception as e:
+        return HTMLResponse(content=f"Error connecting to WhatsApp service: {e}", status_code=500)
+
 # Settings state for auto-fetch
 SETTINGS_FILE = "settings.json"
 

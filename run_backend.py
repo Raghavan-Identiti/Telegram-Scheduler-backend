@@ -25,9 +25,10 @@ def main():
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     
+    port = os.environ.get("PORT", "8000")
     # Start Python Backend (FastAPI)
     backend_process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"],
+        [sys.executable, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", port],
         cwd=backend_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

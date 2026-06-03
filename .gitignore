@@ -27,6 +27,28 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# App Data
+uploads/
+logs/
+data/
+*.db
+*.xlsx
+*.session
+
+# WhatsApp Auth (Crucial so you don't commit sessions)
+whatsapp-service/.wwebjs_auth/
+whatsapp-service/.wwebjs_cache/
 .env*
 .env
 

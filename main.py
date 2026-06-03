@@ -22,6 +22,8 @@ from dateutil import parser
 from recurrence_scheduler import router as recurrence_router
 from scheduler import scheduler
 from apscheduler.triggers.cron import CronTrigger
+from whatsapp_routes import router as whatsapp_router
+from whatsapp_worker import start_worker, stop_worker
 ist = pytz.timezone("Asia/Kolkata")
 
 
@@ -46,6 +48,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 app.include_router(logs_router, prefix="/api")
 app.include_router(recurrence_router, prefix="/api")
+app.include_router(whatsapp_router, prefix="/api")
 
 # Settings state for auto-fetch
 SETTINGS_FILE = "settings.json"
@@ -138,6 +141,11 @@ def update_scheduler_job():
 @app.on_event("startup")
 async def startup_event():
     update_scheduler_job()
+    start_worker()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await stop_worker()
 
 class AutoFetchSettings(BaseModel):
     enabled: bool

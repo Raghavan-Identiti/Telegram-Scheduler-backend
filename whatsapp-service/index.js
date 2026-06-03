@@ -47,7 +47,15 @@ const client = new Client({
   puppeteer: {
     executablePath: fs.existsSync(executablePath) ? executablePath : undefined,
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-extensions"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-extensions",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--no-zygote",
+      "--single-process"
+    ],
   },
 });
 

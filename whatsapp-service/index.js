@@ -70,6 +70,20 @@ client.on("qr", async (qr) => {
   qrString = qr;
 });
 
+client.on("authenticated", () => {
+  console.log("✅ WhatsApp Web Authenticated (session saved)!");
+  qrString = null; // Clear QR immediately so the user knows it worked
+});
+
+client.on("auth_failure", (msg) => {
+  console.error("❌ WhatsApp Web Authentication Failure:", msg);
+});
+
+client.on("disconnected", (reason) => {
+  console.log("❌ WhatsApp Web Disconnected:", reason);
+  clientReady = false;
+});
+
 client.on("ready", async () => {
   console.log("✅ WhatsApp Web connected and ready!");
   clientReady = true;
@@ -289,6 +303,10 @@ app.get("/", async (req, res) => {
                             window.location.reload();
                         } else if (data.qr) {
                             document.getElementById('qr-img').src = data.qr;
+                        } else {
+                            // qrString is null, meaning authenticated but syncing
+                            document.getElementById('qr-img').style.display = 'none';
+                            document.querySelector('p').innerHTML = '<b>Authenticated! Syncing chats... please wait.</b>';
                         }
                     } catch (e) {}
                 }, 5000);

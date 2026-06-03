@@ -5,9 +5,11 @@ import os
 import signal
 
 def stream_output(pipe, prefix, color_code):
-    for line in iter(pipe.readline, b''):
+    for line in iter(pipe.readline, ''):
+        if not line:
+            break
         try:
-            line_str = line.decode('utf-8').rstrip()
+            line_str = line.rstrip()
             print(f"\033[{color_code}m[{prefix}]\033[0m {line_str}", flush=True)
         except Exception:
             pass
@@ -26,13 +28,17 @@ def main():
     env["PYTHONIOENCODING"] = "utf-8"
     
     port = os.environ.get("PORT", "8000")
+    print(f"\033[92mStarting Uvicorn on port {port}...\033[0m", flush=True)
+    
     # Start Python Backend (FastAPI)
     backend_process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", port],
         cwd=backend_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        env=env
+        env=env,
+        text=True,
+        bufsize=1
     )
     
     # Start Node.js WhatsApp Service directly using node (better for graceful shutdown)
@@ -40,7 +46,9 @@ def main():
         ["node", "index.js"],
         cwd=whatsapp_dir,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1
     )
     
     # Threads to stream output (34 = blue for API, 35 = magenta for WhatsApp)

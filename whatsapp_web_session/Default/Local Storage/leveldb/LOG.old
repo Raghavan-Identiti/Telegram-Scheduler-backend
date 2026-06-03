@@ -1,6 +1,0 @@
-2026/05/26-19:01:54.033 7354 Reusing MANIFEST E:\TeleQueue\backend\whatsapp_web_session\Default\Local Storage\leveldb/MANIFEST-000001
-2026/05/26-19:01:54.042 7354 Recovering log #7
-2026/05/26-19:01:54.044 7354 Reusing old log E:\TeleQueue\backend\whatsapp_web_session\Default\Local Storage\leveldb/000007.log 
-2026/05/26-19:02:05.111 7354 Level-0 table #11: started
-2026/05/26-19:02:05.121 7354 Level-0 table #11: 15229 bytes OK
-2026/05/26-19:02:05.124 7354 Delete type=0 #7

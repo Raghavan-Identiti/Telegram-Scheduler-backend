@@ -10,6 +10,14 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// Global process error handlers to stabilize the production Node service
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("⚠️ Unhandled Rejection at:", promise, "reason:", reason);
+});
+process.on("uncaughtException", (error) => {
+  console.error("⚠️ Uncaught Exception:", error.stack || error);
+});
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -44,6 +52,8 @@ const client = new Client({
   authStrategy: new LocalAuth({
     clientId: process.env.WHATSAPP_CLIENT_ID || "telequeue-wwebjs",
   }),
+  authTimeoutMs: 180000, // 3 minutes login timeout for slow CPU environments
+  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36", // Override HeadlessChrome UA to bypass anti-bot logout
   puppeteer: {
     executablePath: fs.existsSync(executablePath) ? executablePath : undefined,
     headless: true,

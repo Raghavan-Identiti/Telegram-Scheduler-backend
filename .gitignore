@@ -1,7 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-/node_modules
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -49,6 +49,7 @@ data/
 # WhatsApp Auth (Crucial so you don't commit sessions)
 whatsapp-service/.wwebjs_auth/
 whatsapp-service/.wwebjs_cache/
+whatsapp_web_session/
 .env*
 .env
 

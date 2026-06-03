@@ -152,6 +152,7 @@ def update_scheduler_job():
 
 @app.on_event("startup")
 async def startup_event():
+    scheduler.start()
     update_scheduler_job()
     start_worker()
 

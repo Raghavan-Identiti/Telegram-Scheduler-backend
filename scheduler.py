@@ -8,7 +8,6 @@ import os
 from telegram_utils import send_telegram_message
 
 scheduler = AsyncIOScheduler()
-scheduler.start()
 
 def schedule_message(image_path: str | None, text: str | None, time_str: str, post_number: int, category: str | None = None ):
     run_time = datetime.fromisoformat(time_str) if isinstance(time_str, str) else time_str

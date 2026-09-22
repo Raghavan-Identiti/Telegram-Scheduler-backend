@@ -8,7 +8,7 @@ import pytz
 import os
 import re
 import json
-from telegram_utils import send_telegram_message, CHANNELS, get_blocked_times_from_sheet
+from app.services.telegram_utils import send_telegram_message, CHANNELS, get_blocked_times_from_sheet
 
 router = APIRouter()
 
@@ -223,7 +223,7 @@ async def create_recurring_schedule_from_files(
                 text_contents.append(f.read())
         
         # Extract posts from text
-        from telegram_utils import extract_all_posts_from_texts
+        from app.services.telegram_utils import extract_all_posts_from_texts
         text_posts = extract_all_posts_from_texts(text_contents)
         
         # Process images and save to disk

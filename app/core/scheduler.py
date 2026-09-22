@@ -5,7 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
 from datetime import datetime
 import os
-from telegram_utils import send_telegram_message
+from app.services.telegram_utils import send_telegram_message
 
 scheduler = AsyncIOScheduler()
 

@@ -6,8 +6,8 @@ from fastapi.staticfiles import StaticFiles
 import os, re, json, time
 from typing import List, Dict
 from datetime import date, datetime, timezone,timedelta
-from logs_api import router as logs_router
-from telegram_utils import CHANNELS, extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet,initialize_google_sheets,sheets_available,api_id, api_hash, session_string,save_posts_to_channel_date_sheets,get_click_data_for_links
+from app.routers.logs_api import router as logs_router
+from app.services.telegram_utils import CHANNELS, extract_all_posts_from_texts, send_telegram_message,get_blocked_times_from_sheet,initialize_google_sheets,sheets_available,api_id, api_hash, session_string,save_posts_to_channel_date_sheets,get_click_data_for_links
 import pandas as pd
 import pytz
 from pydantic import BaseModel
@@ -19,11 +19,9 @@ from telethon.tl.functions.messages import GetScheduledHistoryRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.types import InputPeerChannel
 from dateutil import parser
-from recurrence_scheduler import router as recurrence_router
-from scheduler import scheduler
+from app.routers.recurrence_scheduler import router as recurrence_router
+from app.core.scheduler import scheduler
 from apscheduler.triggers.cron import CronTrigger
-from whatsapp_routes import router as whatsapp_router
-from whatsapp_worker import start_worker, stop_worker
 ist = pytz.timezone("Asia/Kolkata")
 
 
@@ -49,28 +47,6 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 app.include_router(logs_router, prefix="/api")
 app.include_router(recurrence_router, prefix="/api")
-app.include_router(whatsapp_router, prefix="/api")
-
-import requests
-from fastapi.responses import HTMLResponse
-
-@app.get("/")
-def get_qr_page():
-    try:
-        resp = requests.get("http://localhost:3001/", timeout=5.0)
-        return HTMLResponse(content=resp.text, status_code=resp.status_code)
-    except Exception as e:
-        return HTMLResponse(content=f"Error connecting to WhatsApp service: {e}", status_code=500)
-
-from fastapi.responses import Response
-
-@app.get("/qr-only")
-def get_qr_only():
-    try:
-        resp = requests.get("http://localhost:3001/qr-only", timeout=5.0)
-        return Response(content=resp.content, media_type="application/json", status_code=resp.status_code)
-    except Exception as e:
-        return Response(content='{"error":"Failed"}', media_type="application/json", status_code=500)
 
 # Settings state for auto-fetch
 SETTINGS_FILE = "settings.json"
@@ -164,11 +140,10 @@ def update_scheduler_job():
 async def startup_event():
     scheduler.start()
     update_scheduler_job()
-    start_worker()
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    await stop_worker()
+    pass
 
 class AutoFetchSettings(BaseModel):
     enabled: bool

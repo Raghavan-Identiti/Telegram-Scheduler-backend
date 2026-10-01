@@ -64,6 +64,20 @@ async def health():
         "message": provider.get("message", "WhatsApp sender is ready"),
     }
 
+@router.get("/qr")
+async def get_qr_code():
+    import requests
+    from app.services.whatsapp_utils import WHATSAPP_SERVICE_URL, WHATSAPP_PROVIDER
+    if WHATSAPP_PROVIDER != "web":
+        return {"qr": None, "ready": True}
+    try:
+        resp = requests.get(f"{WHATSAPP_SERVICE_URL}/qr-only", timeout=5)
+        if resp.ok:
+            return resp.json()
+    except Exception:
+        pass
+    return {"qr": None, "ready": False}
+
 
 @router.get("/chats")
 async def chats():

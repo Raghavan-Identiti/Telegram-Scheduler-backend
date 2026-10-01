@@ -60,3 +60,8 @@ whatsapp_web_session/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Baileys WhatsApp Auth
+baileys_auth_info/
+app-state-sync-*.json
+

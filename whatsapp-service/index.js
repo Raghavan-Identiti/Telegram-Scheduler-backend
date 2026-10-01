@@ -52,21 +52,37 @@ const client = new Client({
   authStrategy: new LocalAuth({
     clientId: process.env.WHATSAPP_CLIENT_ID || "telequeue-wwebjs",
   }),
-  authTimeoutMs: 180000, // 3 minutes login timeout for slow CPU environments
-  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36", // Override HeadlessChrome UA to bypass anti-bot logout
+  authTimeoutMs: 180000,
+  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
   puppeteer: {
     executablePath: fs.existsSync(executablePath) ? executablePath : undefined,
     headless: true,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
-      "--disable-extensions",
       "--disable-dev-shm-usage",
-      "--disable-gpu",
+      "--disable-accelerated-2d-canvas",
+      "--no-first-run",
       "--no-zygote",
-      "--single-process"
+      "--single-process",
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+      "--disable-features=site-per-process",
+      "--disable-background-networking",
+      "--disable-default-apps",
+      "--disable-extensions",
+      "--disable-sync",
+      "--metrics-recording-only",
+      "--mute-audio",
+      "--no-default-browser-check",
+      "--no-pings",
+      "--memory-pressure-off",
     ],
   },
+  webVersionCache: {
+    type: 'remote',
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+  }
 });
 
 client.on("qr", async (qr) => {

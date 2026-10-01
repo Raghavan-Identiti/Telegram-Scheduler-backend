@@ -49,7 +49,7 @@ def main():
 
     # Start WhatsApp Node Service (32 = green for WhatsApp)
     whatsapp_process = subprocess.Popen(
-        ["node", "index.js"],
+        ["node", "--max-old-space-size=150", "index.js"],
         cwd=whatsapp_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

@@ -2,8 +2,8 @@ import asyncio
 import os
 from contextlib import suppress
 
-from whatsapp_store import claim_due_posts, init_db, mark_failed, mark_sent
-from whatsapp_utils import send_scheduled_post_async
+from app.services.whatsapp_store import claim_due_posts, init_db, mark_failed, mark_sent
+from app.services.whatsapp_utils import send_scheduled_post_async
 _worker_task: asyncio.Task | None = None
 POLL_SECONDS = int(os.getenv("WHATSAPP_SCHEDULER_POLL_SECONDS", "5"))
 

@@ -28,6 +28,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the entire backend directory (which includes whatsapp-service)
 COPY . .
 
+# Install Node.js dependencies for whatsapp-service
+RUN cd whatsapp-service && npm install
+
 # Expose the ports
 EXPOSE 8000
 

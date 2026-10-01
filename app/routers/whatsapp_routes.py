@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from whatsapp_store import (
+from app.services.whatsapp_store import (
     cancel_post,
     create_post,
     get_post,
@@ -18,7 +18,7 @@ from whatsapp_store import (
     update_post,
     update_recipient_phone,
 )
-from whatsapp_utils import get_provider_status
+from app.services.whatsapp_utils import get_provider_status
 
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])

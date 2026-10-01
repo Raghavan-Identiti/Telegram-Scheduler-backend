@@ -20,6 +20,8 @@ from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.types import InputPeerChannel
 from dateutil import parser
 from app.routers.recurrence_scheduler import router as recurrence_router
+from app.routers.whatsapp_routes import router as whatsapp_router
+from app.services.whatsapp_worker import start_worker, stop_worker
 from app.core.scheduler import scheduler
 from apscheduler.triggers.cron import CronTrigger
 ist = pytz.timezone("Asia/Kolkata")
@@ -47,6 +49,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 app.include_router(logs_router, prefix="/api")
 app.include_router(recurrence_router, prefix="/api")
+app.include_router(whatsapp_router, prefix="/api")
 
 @app.get("/")
 async def root():
@@ -143,12 +146,13 @@ def update_scheduler_job():
 
 @app.on_event("startup")
 async def startup_event():
+    start_worker()
     scheduler.start()
     update_scheduler_job()
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    pass
+    await stop_worker()
 
 class AutoFetchSettings(BaseModel):
     enabled: bool

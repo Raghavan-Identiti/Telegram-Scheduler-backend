@@ -171,7 +171,7 @@ async def send_scheduled_post_async(post: dict[str, Any]) -> str | None:
 
 
 def send_via_baileys(post: dict[str, Any]) -> str | None:
-    from whatsapp_store import get_recipient
+    from app.services.whatsapp_store import get_recipient
     rec = get_recipient(post.get("recipient_id"))
     
     if rec:

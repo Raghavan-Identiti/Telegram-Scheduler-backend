@@ -21,6 +21,7 @@ def main():
     
     base_dir = os.path.dirname(os.path.abspath(__file__))
     backend_dir = base_dir
+    whatsapp_dir = os.path.join(base_dir, "whatsapp-service")
     
     # Set UTF-8 encoding for the Python subprocess so it doesn't crash on emojis in Windows
     env = os.environ.copy()
@@ -45,11 +46,27 @@ def main():
     
     t1.daemon = True
     t1.start()
+
+    # Start WhatsApp Node Service (32 = green for WhatsApp)
+    whatsapp_process = subprocess.Popen(
+        ["node", "index.js"],
+        cwd=whatsapp_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env=env,
+        text=True,
+        bufsize=1
+    )
+    t2 = threading.Thread(target=stream_output, args=(whatsapp_process.stdout, "WHATSAPP", "32"))
+    t2.daemon = True
+    t2.start()
     
     def cleanup(signum=None, frame=None):
         print("\n\033[91mShutting down all services...\033[0m")
         backend_process.terminate()
+        whatsapp_process.terminate()
         backend_process.wait()
+        whatsapp_process.wait()
         print("\033[92mAll services stopped gracefully.\033[0m")
         sys.exit(0)
 
@@ -59,6 +76,7 @@ def main():
     
     try:
         backend_process.wait()
+        whatsapp_process.wait()
     except KeyboardInterrupt:
         cleanup()
 

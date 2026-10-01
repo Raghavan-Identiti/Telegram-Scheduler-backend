@@ -48,6 +48,11 @@ app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 app.include_router(logs_router, prefix="/api")
 app.include_router(recurrence_router, prefix="/api")
 
+@app.get("/")
+async def root():
+    return {"status": "success", "message": "TeleQueue API is running!"}
+
+
 # Settings state for auto-fetch
 SETTINGS_FILE = "settings.json"
 

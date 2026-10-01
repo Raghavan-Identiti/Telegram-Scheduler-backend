@@ -130,12 +130,17 @@ def initialize_google_sheets():
 sheets_available = initialize_google_sheets()
 
 # --- Telegram Credentials ---
-api_id = int(os.getenv("TELEGRAM_API_ID"))
-api_hash = os.getenv("TELEGRAM_API_HASH")
+api_id_env = os.getenv("TELEGRAM_API_ID")
+api_id = int(api_id_env) if api_id_env else 1111111  # Dummy value to pass Telethon checks
+api_hash = os.getenv("TELEGRAM_API_HASH", "dummy_hash_for_local_testing")
 phone = os.getenv("TELEGRAM_PHONE_NUMBER")
 session_string = os.getenv("TELETHON_SESSION")
 
-client = TelegramClient(StringSession(session_string), api_id, api_hash)
+# We wrap in try-except in case dummy values cause connection errors later
+try:
+    client = TelegramClient(StringSession(session_string), api_id, api_hash)
+except ValueError:
+    client = None
 # scheduler = TelegramScheduler()
 
 

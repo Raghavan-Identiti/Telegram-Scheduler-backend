@@ -49,7 +49,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/logs", StaticFiles(directory="logs"), name="logs")
 app.include_router(logs_router, prefix="/api")
 app.include_router(recurrence_router, prefix="/api")
-app.include_router(whatsapp_router, prefix="/api")
+app.include_router(whatsapp_router)
 
 @app.get("/")
 async def root():

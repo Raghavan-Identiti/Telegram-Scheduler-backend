@@ -80,8 +80,7 @@ const client = new Client({
     ],
   },
   webVersionCache: {
-    type: 'remote',
-    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+    type: 'local',
   }
 });
 
@@ -622,26 +621,9 @@ app.post("/send", upload.single("image"), async (req, res) => {
         req.file.size,
       );
 
-      if (finalJid.endsWith("@newsletter")) {
-        console.log("Applying forward workaround for Newsletter media...");
-        // Send to ourselves first (this formats the image perfectly for WhatsApp servers)
-        const meMsg = await client.sendMessage(
-          client.info.wid._serialized,
-          media,
-          { caption: message },
-        );
-        // Forward the perfectly formatted image to the Channel
-        await meMsg.forward(finalJid);
-        sentMsg = meMsg; // Use meMsg as the valid reference so we have a valid message ID
-        // Clean up our own chat
-        try {
-          await meMsg.delete(true);
-        } catch (e) {}
-      } else {
-        sentMsg = await client.sendMessage(finalJid, media, {
-          caption: message,
-        });
-      }
+      sentMsg = await client.sendMessage(finalJid, media, {
+        caption: message,
+      });
 
       // cleanup uploaded file
       fs.unlink(req.file.path, (err) => {

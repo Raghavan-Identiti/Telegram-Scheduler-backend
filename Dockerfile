@@ -28,12 +28,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the entire backend directory (which includes whatsapp-service)
 COPY . .
 
-# Install Node dependencies for WhatsApp Service
-RUN cd whatsapp-service && npm install
-
 # Expose the ports
 EXPOSE 8000
-EXPOSE 3001
 
 # Set the environment variable for Python to not buffer stdout
 ENV PYTHONUNBUFFERED=1

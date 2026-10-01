@@ -57,7 +57,8 @@ async def startup():
 @router.get("/health")
 async def health():
     provider = await get_provider_status()
-    configured = bool(provider.get("logged_in"))
+    # Support both "connected" (from our node service) and "logged_in" (cloud API)
+    configured = bool(provider.get("logged_in") or provider.get("connected"))
     return {
         "configured": configured,
         "provider": "baileys",

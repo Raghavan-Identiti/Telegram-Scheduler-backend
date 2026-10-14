@@ -34,11 +34,7 @@ app = FastAPI()  # <== All API routes will be prefixed with /api
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://telequeue-frontend.vercel.app",
-        "https://telequeue.vercel.app"
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,18 +52,52 @@ async def root():
     return {"status": "success", "message": "TeleQueue API is running!"}
 
 
-# Settings state for auto-fetch
+# Settings state for auto-fetch & dynamic sheets
 SETTINGS_FILE = "settings.json"
 
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "r") as f:
-            return json.load(f)
-    return {"auto_fetch_enabled": False}
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"auto_fetch_enabled": False, "channel_sheets": {}}
 
 def save_settings(settings):
     with open(SETTINGS_FILE, "w") as f:
-        json.dump(settings, f)
+        json.dump(settings, f, indent=2)
+
+@app.get("/api/sheets/config")
+async def get_sheets_config():
+    """Retrieve dynamic Google Sheet configuration per channel"""
+    settings = load_settings()
+    return {
+        "status": "success",
+        "channel_sheets": settings.get("channel_sheets", {})
+    }
+
+@app.post("/api/sheets/update-config")
+async def update_sheets_config(payload: Dict):
+    """Save updated Google Sheet URLs and IDs per channel"""
+    settings = load_settings()
+    channels_data = payload.get("channels", [])
+    sheet_map = settings.get("channel_sheets", {})
+    
+    for item in channels_data:
+        cid = item.get("channelId") or item.get("channel_id")
+        sid = item.get("sheetId") or item.get("sheet_id")
+        if cid and sid:
+            clean_cid = cid.replace("@", "").strip()
+            sheet_map[clean_cid] = sid
+            
+    settings["channel_sheets"] = sheet_map
+    save_settings(settings)
+    return {
+        "status": "success",
+        "message": "Google Sheet configuration saved successfully",
+        "channel_sheets": sheet_map
+    }
 
 async def auto_fetch_yesterday_posts():
     print("⏰ Running daily auto-fetch for yesterday's posts...")

@@ -847,17 +847,30 @@ def extract_links(text: str):
 # FIXED: Update the get_channel_sheet_id function to handle channel name properly
 def get_channel_sheet_id(channel_name: str):
     """
-    Map channel names to their dedicated Google Sheet IDs
+    Map channel names to their dedicated Google Sheet IDs (dynamically configurable)
     """
-    # Clean the channel name - remove @ if present
-    clean_channel_name = channel_name.replace('@', '')
+    clean_channel_name = channel_name.replace('@', '').strip()
     
+    # 1. Check dynamic settings.json first
+    try:
+        if os.path.exists("settings.json"):
+            with open("settings.json", "r") as f:
+                settings_data = json.load(f)
+                dynamic_sheets = settings_data.get("channel_sheets", {})
+                if clean_channel_name in dynamic_sheets and dynamic_sheets[clean_channel_name]:
+                    sheet_id = dynamic_sheets[clean_channel_name]
+                    print(f"📊 Using dynamic sheet from settings for {clean_channel_name}: {sheet_id}")
+                    return sheet_id
+    except Exception as e:
+        print(f"Notice reading dynamic settings: {e}")
+    
+    # 2. Fallback to verified default production sheets
     CHANNEL_SHEETS = {
         'amazonindiaassociates': '18HviAE73HrRThTlotvUIPWAbRIlIH17MGBUNj4-2Hgw',
         'Amazon_Associates_FashionBeauty': '1Nq1R38-uYLVPzdH2yGorG7XVyfLcxVTBEYQUqF7J_sQ', 
         'Amazon_Associates_HomeKitchen': '12vjND6MPAXR_5heIdBqUaGOf4VVvUQvONRkLwcmE7UA',
         'Amazon_Associates_Consumables': '1smDQFHgQ0HT2_R8nKFgY527wqbdFUuyeHLbL6zWgmk0',
-        'amazoninfluencerprogramindia' : '1hAjWDjh1jbA5gUGGMF83MUcmiARrKThx4DJ_zNUxQHg'
+        'amazoninfluencerprogramindia': '1hAjWDjh1jbA5gUGGMF83MUcmiARrKThx4DJ_zNUxQHg'
     }
     
     sheet_id = CHANNEL_SHEETS.get(clean_channel_name, None)

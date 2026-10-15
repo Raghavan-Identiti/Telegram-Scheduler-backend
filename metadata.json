@@ -1,0 +1,6 @@
+{
+  "name": "TeleQueue - Telegram & WhatsApp Channel Scheduler",
+  "description": "Multi-channel automated post scheduler, recurrence engine, affiliate click analytics, and post logger for Telegram and WhatsApp channels.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -34,7 +34,12 @@ app = FastAPI()  # <== All API routes will be prefixed with /api
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://telequeue.vercel.app",
+        "https://telequeue-frontend.vercel.app",
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app|https://.*\.run\.app|http://localhost:\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -53,19 +58,40 @@ async def root():
 
 
 # Settings state for auto-fetch & dynamic sheets
-SETTINGS_FILE = "settings.json"
+def get_settings_file_path():
+    """Find settings.json reliably across local, Docker, and Render environments"""
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.json"),
+        os.path.join(os.getcwd(), "settings.json"),
+        "/app/settings.json",
+        "settings.json"
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return candidates[0]
+
+def extract_sheet_id_from_url(url_or_id: str) -> str:
+    if not url_or_id:
+        return ""
+    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", str(url_or_id))
+    if match:
+        return match.group(1)
+    return str(url_or_id).strip()
 
 def load_settings():
-    if os.path.exists(SETTINGS_FILE):
+    filepath = get_settings_file_path()
+    if os.path.exists(filepath):
         try:
-            with open(SETTINGS_FILE, "r") as f:
+            with open(filepath, "r") as f:
                 return json.load(f)
         except Exception:
             pass
     return {"auto_fetch_enabled": False, "channel_sheets": {}}
 
 def save_settings(settings):
-    with open(SETTINGS_FILE, "w") as f:
+    filepath = get_settings_file_path()
+    with open(filepath, "w") as f:
         json.dump(settings, f, indent=2)
 
 @app.get("/api/sheets/config")
@@ -79,20 +105,28 @@ async def get_sheets_config():
 
 @app.post("/api/sheets/update-config")
 async def update_sheets_config(payload: Dict):
-    """Save updated Google Sheet URLs and IDs per channel"""
+    """Save updated Google Sheet URLs and tab names per channel dynamically"""
     settings = load_settings()
     channels_data = payload.get("channels", [])
     sheet_map = settings.get("channel_sheets", {})
     
     for item in channels_data:
         cid = item.get("channelId") or item.get("channel_id")
-        sid = item.get("sheetId") or item.get("sheet_id")
-        if cid and sid:
+        surl = item.get("sheetUrl") or item.get("sheet_url") or ""
+        sid = item.get("sheetId") or item.get("sheet_id") or extract_sheet_id_from_url(surl)
+        stab = item.get("sheetTab") or item.get("sheet_tab") or item.get("tab_name") or ""
+        
+        if cid and (sid or surl):
             clean_cid = cid.replace("@", "").strip()
-            sheet_map[clean_cid] = sid
+            sheet_map[clean_cid] = {
+                "sheet_id": sid,
+                "sheet_url": surl,
+                "sheet_tab": stab
+            }
             
     settings["channel_sheets"] = sheet_map
     save_settings(settings)
+    print(f"✅ Dynamic Google Sheets config updated in settings.json: {sheet_map}")
     return {
         "status": "success",
         "message": "Google Sheet configuration saved successfully",

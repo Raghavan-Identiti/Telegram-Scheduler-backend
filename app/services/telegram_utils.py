@@ -939,7 +939,7 @@ def extract_links(text: str):
 # Dynamic get_channel_sheet_id and get_channel_sheet_config are defined above
 
 # FIXED: Update create_channel_date_worksheet with better logging
-def create_channel_date_worksheet(channel_name: str, date_str: str, headers: List[str], scheduled: bool = False, custom_sheet_id: str = None):
+def create_channel_date_worksheet(channel_name: str, date_str: str, headers: List[str], scheduled: bool = False):
     """Create worksheet with format: 'DD Mon YYYY' or 'DD Mon YYYY - Scheduled Posts' """
     global gc
     if not gc:
@@ -950,9 +950,8 @@ def create_channel_date_worksheet(channel_name: str, date_str: str, headers: Lis
 
     @retry_gsheet
     def get_or_create_worksheet():
-        # Get the correct sheet ID: custom_sheet_id if passed, else dynamic lookup
-        sheet_id = extract_sheet_id(custom_sheet_id) if custom_sheet_id else get_channel_sheet_id(channel_name)
-        print(f"📊 Opening spreadsheet: {sheet_id} for channel {channel_name}")
+        # Get the correct sheet ID for this channel
+        sheet_id = get_channel_sheet_id(channel_name)
         sh = gc.open_by_key(sheet_id)
 
         # Convert "22_Sep_2025" → "22 Sep 2025"
@@ -1052,7 +1051,7 @@ def get_click_data_for_links(links, date_str):
         "whatsapp_links": whatsapp_links
     }
 
-def save_posts_to_channel_date_sheets(posts: list, channel: str, scheduled: bool = False, custom_sheet_id: str = None):
+def save_posts_to_channel_date_sheets(posts: list, channel: str, scheduled: bool = False):
     """
     Save posts to Google Sheets per channel and date.
     Uses batch operations to avoid rate limits.
@@ -1061,8 +1060,7 @@ def save_posts_to_channel_date_sheets(posts: list, channel: str, scheduled: bool
     if not posts:
         return "No posts to save."
 
-    sheet_id = extract_sheet_id(custom_sheet_id) if custom_sheet_id else get_channel_sheet_id(channel)
-    print(f"📑 Saving {len(posts)} posts for channel {channel} to Google Sheet ID: {sheet_id}")
+    sheet_id = get_channel_sheet_id(channel)
     sh = gc.open_by_key(sheet_id)
 
     # Updated headers: removed Channel, added separate link columns
@@ -1074,7 +1072,7 @@ def save_posts_to_channel_date_sheets(posts: list, channel: str, scheduled: bool
     
     total_saved = 0
     for post_date_str, date_posts in grouped_posts.items():
-        ws = create_channel_date_worksheet(channel, post_date_str, headers, scheduled, custom_sheet_id=sheet_id)
+        ws = create_channel_date_worksheet(channel, post_date_str, headers, scheduled)
         if not ws:
             print(f"❌ Unable to get worksheet for {channel} {post_date_str}")
             continue

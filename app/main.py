@@ -340,33 +340,9 @@ async def auto_schedule(
     channels: str = Form(...),
     send_image_only: bool = Form(default=False),
     interval_minutes: int = Form(default=0),
-    scheduling_mode: str = Form(default="auto"),
-    channel_sheets: str = Form(default="")
+    scheduling_mode: str = Form(default="auto")
 ):
     try:
-        # Dynamically sync channel sheets if passed
-        if channel_sheets:
-            try:
-                sheet_list = json.loads(channel_sheets)
-                settings = load_settings()
-                sheet_map = settings.get("channel_sheets", {})
-                for item in sheet_list:
-                    cid = item.get("channelId") or item.get("channel_id")
-                    surl = item.get("sheetUrl") or item.get("sheet_url") or ""
-                    sid = item.get("sheetId") or item.get("sheet_id") or extract_sheet_id_from_url(surl)
-                    stab = item.get("sheetTab") or item.get("sheet_tab") or item.get("tab_name") or ""
-                    if cid and (sid or surl):
-                        clean_cid = cid.replace("@", "").strip()
-                        sheet_map[clean_cid] = {
-                            "sheet_id": sid,
-                            "sheet_url": surl,
-                            "sheet_tab": stab
-                        }
-                settings["channel_sheets"] = sheet_map
-                save_settings(settings)
-                print(f"🎯 Dynamic sheets updated before auto-scheduling: {sheet_map}")
-            except Exception as e:
-                print(f"Notice updating channel sheets: {e}")
 
         # Parse selected channels
         selected_channels = json.loads(channels) if channels else []
@@ -698,9 +674,6 @@ class ReadPostsRequest(BaseModel):
     channel: str
     start_time: datetime
     end_time: datetime
-    sheet_url: str = ""
-    sheet_id: str = ""
-    sheet_tab: str = ""
 
 def extract_links(text: str):
     if not text:
@@ -769,24 +742,7 @@ async def read_posts(req: ReadPostsRequest):
 
             posts_data.append(post_info)
 
-    target_sheet = req.sheet_id or req.sheet_url or None
-    if target_sheet:
-        try:
-            settings = load_settings()
-            clean_ch = req.channel.replace('@', '').strip()
-            sheet_map = settings.get("channel_sheets", {})
-            sheet_map[clean_ch] = {
-                "sheet_id": extract_sheet_id_from_url(target_sheet),
-                "sheet_url": req.sheet_url or "",
-                "sheet_tab": req.sheet_tab or ""
-            }
-            settings["channel_sheets"] = sheet_map
-            save_settings(settings)
-            print(f"🎯 Dynamic sheet for channel {clean_ch} received: {target_sheet}")
-        except Exception as e:
-            print(f"Notice saving sheet config: {e}")
-
-    save_msg = save_posts_to_channel_date_sheets(posts_data, req.channel, scheduled=False, custom_sheet_id=target_sheet)
+    save_msg = save_posts_to_channel_date_sheets(posts_data, req.channel, scheduled=False)
     return {
         "status": "success",
         "count": len(posts_data),
@@ -828,23 +784,7 @@ async def read_scheduled_messages(req: ReadPostsRequest):
 
             scheduled_posts.append(post_info)
 
-    target_sheet = req.sheet_id or req.sheet_url or None
-    if target_sheet:
-        try:
-            settings = load_settings()
-            clean_ch = req.channel.replace('@', '').strip()
-            sheet_map = settings.get("channel_sheets", {})
-            sheet_map[clean_ch] = {
-                "sheet_id": extract_sheet_id_from_url(target_sheet),
-                "sheet_url": req.sheet_url or "",
-                "sheet_tab": req.sheet_tab or ""
-            }
-            settings["channel_sheets"] = sheet_map
-            save_settings(settings)
-        except Exception:
-            pass
-
-    save_msg = save_posts_to_channel_date_sheets(scheduled_posts, req.channel, scheduled=True, custom_sheet_id=target_sheet)
+    save_msg = save_posts_to_channel_date_sheets(scheduled_posts, req.channel, scheduled=True)
     return {
         "status": "success",
         "count": len(scheduled_posts),

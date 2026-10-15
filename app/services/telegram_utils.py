@@ -451,6 +451,91 @@ def append_row_to_sheet(values):
     
     return False
 
+def get_settings_file_path():
+    """Find settings.json reliably across local, Docker, and Render environments"""
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "settings.json"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "settings.json"),
+        os.path.join(os.getcwd(), "settings.json"),
+        "/app/settings.json",
+        "settings.json"
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return candidates[0]
+
+def extract_sheet_id(url_or_id: str) -> str:
+    """Extract Google Spreadsheet ID from full URL or return ID string"""
+    if not url_or_id:
+        return ""
+    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", str(url_or_id))
+    if match:
+        return match.group(1)
+    return str(url_or_id).strip()
+
+def get_channel_sheet_config(channel_name: str) -> dict:
+    """
+    Retrieve configured sheet ID, URL, and tab name per channel (dynamic from settings.json)
+    """
+    clean_name = str(channel_name).replace('@', '').strip().lower()
+    
+    # 1. Read from settings.json
+    try:
+        filepath = get_settings_file_path()
+        if os.path.exists(filepath):
+            with open(filepath, "r") as f:
+                data = json.load(f)
+                dynamic_sheets = data.get("channel_sheets", {})
+                for key, val in dynamic_sheets.items():
+                    if key.replace('@', '').strip().lower() == clean_name:
+                        if isinstance(val, dict):
+                            sid = extract_sheet_id(val.get("sheet_id") or val.get("sheet_url"))
+                            tab = val.get("sheet_tab") or val.get("tab_name") or ""
+                            if sid:
+                                return {"sheet_id": sid, "tab_name": tab}
+                        elif isinstance(val, str) and val.strip():
+                            return {"sheet_id": extract_sheet_id(val), "tab_name": ""}
+    except Exception as e:
+        print(f"Notice reading dynamic sheet settings: {e}")
+
+    # 2. Verified fallback defaults
+    DEFAULT_SHEETS = {
+        'amazonindiaassociates': {
+            'sheet_id': '18HviAE73HrRThTlotvUIPWAbRIlIH17MGBUNj4-2Hgw',
+            'tab_name': 'Amazon_India_Associates'
+        },
+        'amazon_associates_fashionbeauty': {
+            'sheet_id': '1Nq1R38-uYLVPzdH2yGorG7XVyfLcxVTBEYQUqF7J_sQ',
+            'tab_name': 'Fashion_Beauty'
+        },
+        'amazon_associates_homekitchen': {
+            'sheet_id': '12vjND6MPAXR_5heIdBqUaGOf4VVvUQvONRkLwcmE7UA',
+            'tab_name': 'Home_Kitchen'
+        },
+        'amazon_associates_consumables': {
+            'sheet_id': '1smDQFHgQ0HT2_R8nKFgY527wqbdFUuyeHLbL6zWgmk0',
+            'tab_name': 'Consumables'
+        },
+        'amazoninfluencerprogramindia': {
+            'sheet_id': '1hAjWDjh1jbA5gUGGMF83MUcmiARrKThx4DJ_zNUxQHg',
+            'tab_name': 'Amazon Influencer Program India'
+        }
+    }
+    return DEFAULT_SHEETS.get(clean_name, {'sheet_id': SHEET_ID, 'tab_name': ''})
+
+def get_channel_sheet_id(channel_name: str) -> str:
+    cfg = get_channel_sheet_config(channel_name)
+    sid = cfg.get('sheet_id')
+    return sid if sid else SHEET_ID
+
+def get_channel_tab_name(channel_name: str) -> str:
+    cfg = get_channel_sheet_config(channel_name)
+    if cfg.get('tab_name'):
+        return cfg['tab_name']
+    clean_name = str(channel_name).replace('@', '').strip()
+    return CHANNELS.get(clean_name, {}).get('sheet_name', 'Sheet1')
+
 def log_post_status_gsheet(post_number, category, status, schedule_time, message, channel_id):
     """Log post status to Google Sheets with consistent formatting"""
     if not sheets_available or not gc:
@@ -458,9 +543,19 @@ def log_post_status_gsheet(post_number, category, status, schedule_time, message
         return
 
     try:
-        workbook = gc.open_by_key(SHEET_ID)
-        sheet_name = CHANNELS[channel_id]['sheet_name']
-        channel_sheet = workbook.worksheet(sheet_name)
+        target_sheet_id = get_channel_sheet_id(channel_id)
+        sheet_name = get_channel_tab_name(channel_id)
+        print(f"📊 Logging post {post_number} to target sheet {target_sheet_id} tab '{sheet_name}' for channel {channel_id}")
+        workbook = gc.open_by_key(target_sheet_id)
+        
+        try:
+            channel_sheet = workbook.worksheet(sheet_name)
+        except gspread.WorksheetNotFound:
+            try:
+                channel_sheet = workbook.add_worksheet(title=sheet_name, rows=1000, cols=10)
+                channel_sheet.append_row(["Post Number", "Category", "Date", "Time", "Status", "Message", "Channel"])
+            except Exception:
+                channel_sheet = workbook.sheet1
         
         # Format datetime consistently
         schedule_time = format_datetime_consistently(schedule_time)
@@ -578,60 +673,57 @@ def get_blocked_times_from_sheet(channel_ids=None):
             return []
     
     blocked = []
-    try:
-        workbook = gc.open_by_key(SHEET_ID)
-        channels_to_check = channel_ids or list(CHANNELS.keys())
-        
-        for channel_id in channels_to_check:
-            sheet_name = CHANNELS[channel_id]['sheet_name']
+    channels_to_check = channel_ids or list(CHANNELS.keys())
+    
+    for channel_id in channels_to_check:
+        try:
+            target_sheet_id = get_channel_sheet_id(channel_id)
+            sheet_name = get_channel_tab_name(channel_id)
+            workbook = gc.open_by_key(target_sheet_id)
             try:
                 channel_sheet = workbook.worksheet(sheet_name)
-                records = channel_sheet.get_all_records()
-                
-                for rec in records:
-                    date = str(rec.get("Date", "")).strip()
-                    time = str(rec.get("Time", "")).strip()
-                    status = str(rec.get("Status", "")).strip()
-
-                    if not date or not time:
-                        continue
-
-                    if status:  # Any non-empty status means this time slot was used
-                        dt_str = f"{date} {time}"
-                        dt = None
-
-                        # Flexible parsing to match both logging styles
-                        formats = [
-                            "%Y-%m-%d %H:%M:%S",
-                            "%Y-%m-%d %H:%M",
-                            "%d/%m/%Y %H:%M:%S", 
-                            "%d/%m/%Y %H:%M",
-                            "%Y/%m/%d %H:%M:%S",
-                            "%Y/%m/%d %H:%M",
-                            "%m/%d/%Y %H:%M:%S",
-                            "%m/%d/%Y %H:%M",
-                        ]
-
-                        for fmt in formats:
-                            try:
-                                dt = datetime.strptime(dt_str, fmt)
-                                break
-                            except ValueError:
-                                continue
-
-                        if dt:
-                            blocked.append(dt)
-                            print(f"🚫 Blocked time slot found: {dt} (Status: {status}) from {sheet_name}")
-                        else:
-                            print(f"⚠️ Could not parse datetime: {dt_str}")
-                            
             except gspread.WorksheetNotFound:
-                print(f"Sheet {sheet_name} not found, skipping")
-                continue
+                channel_sheet = workbook.sheet1
                 
-    except Exception as e:
-        print(f"❌ Error reading blocked times: {e}")
-    
+            records = channel_sheet.get_all_records()
+            for rec in records:
+                date = str(rec.get("Date", "")).strip()
+                time = str(rec.get("Time", "")).strip()
+                status = str(rec.get("Status", "")).strip()
+
+                if not date or not time:
+                    continue
+
+                if status:
+                    dt_str = f"{date} {time}"
+                    dt = None
+                    formats = [
+                        "%Y-%m-%d %H:%M:%S",
+                        "%Y-%m-%d %H:%M",
+                        "%d/%m/%Y %H:%M:%S", 
+                        "%d/%m/%Y %H:%M",
+                        "%Y/%m/%d %H:%M:%S",
+                        "%Y/%m/%d %H:%M",
+                        "%m/%d/%Y %H:%M:%S",
+                        "%m/%d/%Y %H:%M",
+                    ]
+                    for fmt in formats:
+                        try:
+                            dt = datetime.strptime(dt_str, fmt)
+                            break
+                        except ValueError:
+                            continue
+
+                    if dt:
+                        blocked.append(dt)
+                        print(f"🚫 Blocked time slot found: {dt} (Status: {status}) from {sheet_name}")
+                    else:
+                        print(f"⚠️ Could not parse datetime: {dt_str}")
+
+        except Exception as e:
+            print(f"❌ Error reading blocked times for channel {channel_id}: {e}")
+            continue
+
     print(f"📊 Total blocked time slots found: {len(blocked)}")
     return blocked
     
@@ -844,42 +936,7 @@ def extract_links(text: str):
     cleaned_links = [re.sub(r"^[*_()<>]+|[*_()<>.,!?]+$", "", link).strip() for link in links]
     return cleaned_links
 
-# FIXED: Update the get_channel_sheet_id function to handle channel name properly
-def get_channel_sheet_id(channel_name: str):
-    """
-    Map channel names to their dedicated Google Sheet IDs (dynamically configurable)
-    """
-    clean_channel_name = channel_name.replace('@', '').strip()
-    
-    # 1. Check dynamic settings.json first
-    try:
-        if os.path.exists("settings.json"):
-            with open("settings.json", "r") as f:
-                settings_data = json.load(f)
-                dynamic_sheets = settings_data.get("channel_sheets", {})
-                if clean_channel_name in dynamic_sheets and dynamic_sheets[clean_channel_name]:
-                    sheet_id = dynamic_sheets[clean_channel_name]
-                    print(f"📊 Using dynamic sheet from settings for {clean_channel_name}: {sheet_id}")
-                    return sheet_id
-    except Exception as e:
-        print(f"Notice reading dynamic settings: {e}")
-    
-    # 2. Fallback to verified default production sheets
-    CHANNEL_SHEETS = {
-        'amazonindiaassociates': '18HviAE73HrRThTlotvUIPWAbRIlIH17MGBUNj4-2Hgw',
-        'Amazon_Associates_FashionBeauty': '1Nq1R38-uYLVPzdH2yGorG7XVyfLcxVTBEYQUqF7J_sQ', 
-        'Amazon_Associates_HomeKitchen': '12vjND6MPAXR_5heIdBqUaGOf4VVvUQvONRkLwcmE7UA',
-        'Amazon_Associates_Consumables': '1smDQFHgQ0HT2_R8nKFgY527wqbdFUuyeHLbL6zWgmk0',
-        'amazoninfluencerprogramindia': '1hAjWDjh1jbA5gUGGMF83MUcmiARrKThx4DJ_zNUxQHg'
-    }
-    
-    sheet_id = CHANNEL_SHEETS.get(clean_channel_name, None)
-    if sheet_id:
-        print(f"📊 Using dedicated sheet for {clean_channel_name}: {sheet_id}")
-        return sheet_id
-    else:
-        print(f"⚠️ No dedicated sheet found for {clean_channel_name}, using default: {SHEET_ID}")
-        return SHEET_ID
+# Dynamic get_channel_sheet_id and get_channel_sheet_config are defined above
 
 # FIXED: Update create_channel_date_worksheet with better logging
 def create_channel_date_worksheet(channel_name: str, date_str: str, headers: List[str], scheduled: bool = False):

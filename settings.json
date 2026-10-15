@@ -1,1 +1,30 @@
-{"auto_fetch_enabled": true}
+{
+  "auto_fetch_enabled": true,
+  "channel_sheets": {
+    "amazonindiaassociates": {
+      "sheet_id": "18HviAE73HrRThTlotvUIPWAbRIlIH17MGBUNj4-2Hgw",
+      "sheet_url": "https://docs.google.com/spreadsheets/d/18HviAE73HrRThTlotvUIPWAbRIlIH17MGBUNj4-2Hgw/edit",
+      "sheet_tab": "Amazon_India_Associates"
+    },
+    "Amazon_Associates_FashionBeauty": {
+      "sheet_id": "1Nq1R38-uYLVPzdH2yGorG7XVyfLcxVTBEYQUqF7J_sQ",
+      "sheet_url": "https://docs.google.com/spreadsheets/d/1Nq1R38-uYLVPzdH2yGorG7XVyfLcxVTBEYQUqF7J_sQ/edit",
+      "sheet_tab": "Fashion_Beauty"
+    },
+    "Amazon_Associates_HomeKitchen": {
+      "sheet_id": "12vjND6MPAXR_5heIdBqUaGOf4VVvUQvONRkLwcmE7UA",
+      "sheet_url": "https://docs.google.com/spreadsheets/d/12vjND6MPAXR_5heIdBqUaGOf4VVvUQvONRkLwcmE7UA/edit",
+      "sheet_tab": "Home_Kitchen"
+    },
+    "Amazon_Associates_Consumables": {
+      "sheet_id": "1smDQFHgQ0HT2_R8nKFgY527wqbdFUuyeHLbL6zWgmk0",
+      "sheet_url": "https://docs.google.com/spreadsheets/d/1smDQFHgQ0HT2_R8nKFgY527wqbdFUuyeHLbL6zWgmk0/edit",
+      "sheet_tab": "Consumables"
+    },
+    "amazoninfluencerprogramindia": {
+      "sheet_id": "1hAjWDjh1jbA5gUGGMF83MUcmiARrKThx4DJ_zNUxQHg",
+      "sheet_url": "https://docs.google.com/spreadsheets/d/1hAjWDjh1jbA5gUGGMF83MUcmiARrKThx4DJ_zNUxQHg/edit",
+      "sheet_tab": "Amazon Influencer Program India"
+    }
+  }
+}

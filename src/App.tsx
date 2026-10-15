@@ -9,8 +9,10 @@ import { StorageService } from './services/storage';
 import { AppSettings } from './types';
 import { CheckCircle2, X } from 'lucide-react';
 
+import { ContentReaderTab } from './components/ContentReaderTab';
+
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<string>('auto-schedule');
+  const [activeTab, setActiveTab] = useState<string>('content-reader');
   const [settings, setSettings] = useState<AppSettings>(() => StorageService.getSettings());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -32,6 +34,12 @@ export const App: React.FC = () => {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {activeTab === 'content-reader' && (
+          <ContentReaderTab
+            settings={settings}
+            onNotify={showToast}
+          />
+        )}
         {activeTab === 'auto-schedule' && (
           <AutoSchedulerTab onScheduleSuccess={showToast} />
         )}

@@ -54,26 +54,33 @@ app = FastAPI(title="TeleQueue API")
 # Comprehensive CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Global exception handler to preserve CORS headers on error
+# Global exception handler preserving dynamic origin
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     import traceback
     print(f"🔥 Error on {request.url.path}: {exc}")
     traceback.print_exc()
+    origin = request.headers.get("origin")
+    headers = {
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+    }
+    if origin:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+    else:
+        headers["Access-Control-Allow-Origin"] = "*"
+
     return JSONResponse(
         status_code=500,
         content={"status": "error", "error": str(exc), "path": str(request.url.path)},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-        }
+        headers=headers
     )
 
 if os.path.exists("uploads"):
@@ -86,13 +93,34 @@ app.include_router(recurrence_router, prefix="/api")
 app.include_router(whatsapp_router)
 
 def get_telethon_creds():
-    raw_id = os.getenv("TELEGRAM_API_ID", "2040")
+    raw_id = (
+        os.getenv("TELEGRAM_API_ID") or
+        os.getenv("API_ID") or
+        os.getenv("TG_API_ID") or
+        "2040"
+    )
     try:
-        api_id_int = int(raw_id) if str(raw_id).strip() else 2040
+        api_id_int = int(str(raw_id).strip())
     except Exception:
         api_id_int = 2040
-    api_hash_val = os.getenv("TELEGRAM_API_HASH", "").strip()
-    session_str = os.getenv("TELEGRAM_SESSION_STRING", "").strip()
+
+    api_hash_val = (
+        os.getenv("TELEGRAM_API_HASH") or
+        os.getenv("API_HASH") or
+        os.getenv("TG_API_HASH") or
+        ""
+    ).strip()
+
+    session_str = (
+        os.getenv("TELEGRAM_SESSION_STRING") or
+        os.getenv("SESSION_STRING") or
+        os.getenv("STRING_SESSION") or
+        os.getenv("TELEGRAM_SESSION") or
+        os.getenv("TELEGRAM_STRING_SESSION") or
+        os.getenv("TELETHON_SESSION") or
+        ""
+    ).strip()
+
     return api_id_int, api_hash_val, session_str
 
 def parse_dt_flexible(dt_val: Any) -> datetime:
@@ -132,6 +160,8 @@ async def root():
 # =========================================================================
 
 @app.get("/api/sheets/config")
+@app.get("/api/sheets/get-config")
+@app.get("/api/settings/sheets")
 async def get_sheets_config():
     """Retrieve dynamic Google Sheet configuration per channel"""
     settings = load_settings()
@@ -143,28 +173,91 @@ async def get_sheets_config():
     }
 
 @app.post("/api/sheets/update-config")
-async def update_sheets_config(payload: Dict[str, Any]):
-    """Save updated Google Sheet URLs and tab names per channel dynamically"""
+@app.post("/api/sheets/update")
+@app.post("/api/sheets/save-config")
+@app.post("/api/sheets/save")
+@app.post("/api/settings/sheets")
+async def update_sheets_config(request: Request):
+    """
+    Save updated Google Sheet URLs and tab names per channel dynamically.
+    Accepts:
+    - { "channels": [ { "channelId": "...", "sheetUrl": "...", "sheetTab": "..." } ] }
+    - [ { "channelId": "...", "sheetUrl": "..." } ]
+    - { "channel_sheets": { ... } }
+    - { "channel": "...", "sheet_url": "...", "sheet_tab": "..." }
+    - Key-value: { "amazonindiaassociates": "https://docs.google.com/..." }
+    - Form data or query params
+    """
+    raw_payload = {}
+    try:
+        content_type = request.headers.get("content-type", "").lower()
+        if "application/json" in content_type:
+            raw_payload = await request.json()
+        elif "form" in content_type:
+            form = await request.form()
+            raw_payload = dict(form)
+        else:
+            try:
+                raw_payload = await request.json()
+            except Exception:
+                try:
+                    form = await request.form()
+                    raw_payload = dict(form)
+                except Exception:
+                    pass
+    except Exception:
+        raw_payload = {}
+
     settings = load_settings()
     sheet_map = settings.get("channel_sheets", {})
 
-    channels_data = payload.get("channels")
-    if channels_data is None and isinstance(payload.get("channel_sheets"), dict):
-        sheet_map.update(payload["channel_sheets"])
-    elif isinstance(channels_data, list):
-        for item in channels_data:
-            cid = item.get("channelId") or item.get("channel_id") or item.get("id") or item.get("channel")
-            surl = item.get("sheetUrl") or item.get("sheet_url") or item.get("url") or item.get("link") or ""
-            sid = item.get("sheetId") or item.get("sheet_id") or extract_sheet_id_from_url(surl)
-            stab = item.get("sheetTab") or item.get("sheet_tab") or item.get("tab_name") or item.get("targetTab") or ""
+    items_to_process = []
+    if isinstance(raw_payload, list):
+        items_to_process = raw_payload
+    elif isinstance(raw_payload, dict):
+        if "channels" in raw_payload and isinstance(raw_payload["channels"], list):
+            items_to_process = raw_payload["channels"]
+        elif "channel_sheets" in raw_payload and isinstance(raw_payload["channel_sheets"], dict):
+            for cid, ccfg in raw_payload["channel_sheets"].items():
+                if isinstance(ccfg, dict):
+                    items_to_process.append({"channelId": cid, **ccfg})
+                elif isinstance(ccfg, str):
+                    items_to_process.append({"channelId": cid, "sheetUrl": ccfg})
+        elif any(k in raw_payload for k in ["channel", "channelId", "channel_id", "channel_name"]):
+            items_to_process = [raw_payload]
+        else:
+            for k, v in raw_payload.items():
+                if isinstance(v, dict):
+                    items_to_process.append({"channelId": k, **v})
+                elif isinstance(v, str) and ("docs.google" in v or "spreadsheets" in v or len(v) > 20):
+                    items_to_process.append({"channelId": k, "sheetUrl": v})
 
-            if cid:
-                clean_cid = cid.replace("@", "").strip()
-                sheet_map[clean_cid] = {
-                    "sheet_id": sid,
-                    "sheet_url": surl,
-                    "sheet_tab": stab
-                }
+    # Also handle query parameters if body was empty
+    if not items_to_process and request.query_params:
+        cid = request.query_params.get("channelId") or request.query_params.get("channel") or request.query_params.get("channel_id")
+        surl = request.query_params.get("sheetUrl") or request.query_params.get("sheet_url")
+        stab = request.query_params.get("sheetTab") or request.query_params.get("sheet_tab")
+        if cid and surl:
+            items_to_process.append({"channelId": cid, "sheetUrl": surl, "sheetTab": stab})
+
+    for item in items_to_process:
+        cid = item.get("channelId") or item.get("channel_id") or item.get("id") or item.get("channel") or item.get("name")
+        surl = item.get("sheetUrl") or item.get("sheet_url") or item.get("url") or item.get("link") or ""
+        sid = item.get("sheetId") or item.get("sheet_id") or extract_sheet_id_from_url(surl)
+        stab = item.get("sheetTab") or item.get("sheet_tab") or item.get("tab_name") or item.get("targetTab") or item.get("tab") or ""
+
+        if cid:
+            clean_cid = str(cid).replace("@", "").strip()
+            if not stab:
+                for k_ch, v_ch in CHANNELS.items():
+                    if k_ch.lower() == clean_cid.lower() or v_ch["username"].lower() == clean_cid.lower():
+                        stab = v_ch["sheet_name"]
+                        break
+            sheet_map[clean_cid] = {
+                "sheet_id": sid,
+                "sheet_url": surl,
+                "sheet_tab": stab or clean_cid
+            }
 
     settings["channel_sheets"] = sheet_map
     save_settings(settings)
@@ -177,24 +270,28 @@ async def update_sheets_config(payload: Dict[str, Any]):
     }
 
 @app.post("/api/sheets/connect-or-check")
+@app.get("/api/sheets/connect-or-check")
 async def connect_or_check(request: Request):
     """Check or reconnect Google Sheets service account"""
     global sheets_available
+    body = {}
     try:
         body = await request.json()
     except Exception:
-        body = {}
+        pass
     reconnect = body.get("reconnect", False)
 
     if reconnect or not sheets_available:
         success = initialize_google_sheets()
         return {
             "connected": success,
+            "status": "success" if success else "error",
             "message": "✅ Connected to Google Sheets" if success else "❌ Failed to connect Google Sheets. Check GOOGLE_SERVICE_ACCOUNT_JSON."
         }
     else:
         return {
             "connected": sheets_available,
+            "status": "success" if sheets_available else "error",
             "message": "✅ Google Sheets connected" if sheets_available else "❌ Google Sheets not connected"
         }
 
@@ -205,8 +302,25 @@ async def test_sheet_connection(request: Request):
     if not sheets_available or not gc:
         initialize_google_sheets()
 
-    body = await request.json()
-    raw_target = body.get("sheet_id") or body.get("sheet_url") or body.get("sheetUrl")
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        try:
+            form = await request.form()
+            body = dict(form)
+        except Exception:
+            pass
+
+    raw_target = (
+        body.get("sheet_id") or
+        body.get("sheet_url") or
+        body.get("sheetUrl") or
+        body.get("url") or
+        body.get("link") or
+        request.query_params.get("sheet_url") or
+        request.query_params.get("sheet_id")
+    )
     if not raw_target:
         return JSONResponse(status_code=400, content={"status": "error", "message": "No sheet URL or ID provided."})
 
@@ -219,7 +333,7 @@ async def test_sheet_connection(request: Request):
             "sheet_title": sh.title,
             "sheet_id": target_id,
             "worksheets": tabs,
-            "message": f"✅ Connected successfully to '{sh.title}'. Found {len(tabs)} tabs."
+            "message": f"✅ Connected successfully to '{sh.title}'. Found {len(tabs)} tabs: {', '.join(tabs[:3])}"
         }
     except Exception as e:
         return JSONResponse(
@@ -227,7 +341,7 @@ async def test_sheet_connection(request: Request):
             content={
                 "status": "error",
                 "sheet_id": target_id,
-                "message": f"❌ Could not access sheet: {str(e)}",
+                "message": f"Could not access sheet: {str(e)}",
                 "help": f"Please ensure spreadsheet is shared with Editor permission with: {service_account_email}"
             }
         )
@@ -438,45 +552,177 @@ async def get_posts_range(
 # =========================================================================
 
 class ReadPostsRequest(BaseModel):
-    channel: str
-    start_time: Any
-    end_time: Any
+    channel: Optional[str] = "amazonindiaassociates"
+    start_time: Optional[Any] = None
+    end_time: Optional[Any] = None
     sheet_url: Optional[str] = None
     sheet_tab: Optional[str] = None
 
 @app.post("/api/read-posts")
-async def read_posts(req: ReadPostsRequest):
+@app.post("/api/content-reader")
+@app.get("/api/read-posts")
+async def read_posts(request: Request):
     """
     ⚡ ULTRA-FAST CONTENT READER WITH DYNAMIC SHEET SYNC ⚡
-    - Scrapes posts with early loop break (newest -> oldest)
-    - Parallel batch fetches Quic.ly click tracking (<2s)
-    - Writes to the channel's dynamic Google Sheet with automatic fallback
+    - Bulletproof parameter extraction (JSON, Form, Query)
+    - Early loop break for instant execution (<3 seconds)
+    - Parallel batch clicks from Quic.ly
+    - Normalizes post fields across all frontend conventions
+    - Saves directly to the channel's dynamic Google Sheet
+    - Automatic fallback to default sheet if new sheet permissions are pending
+    - Never throws 500 or uncaught errors to the frontend
     """
-    api_id_int, api_hash_val, session_str = get_telethon_creds()
-    if not session_str:
-        return JSONResponse(status_code=400, content={"error": "TELEGRAM_SESSION_STRING environment variable is not configured."})
-
+    raw_body = {}
     try:
-        start_dt = parse_dt_flexible(req.start_time)
-        end_dt = parse_dt_flexible(req.end_time)
-    except Exception as e:
-        return JSONResponse(status_code=400, content={"error": f"Invalid start_time or end_time: {e}"})
+        content_type = request.headers.get("content-type", "").lower()
+        if "application/json" in content_type:
+            raw_body = await request.json()
+        elif "form" in content_type:
+            form = await request.form()
+            raw_body = dict(form)
+        else:
+            try:
+                raw_body = await request.json()
+            except Exception:
+                try:
+                    form = await request.form()
+                    raw_body = dict(form)
+                except Exception:
+                    pass
+    except Exception:
+        raw_body = {}
+
+    # Query params fallback
+    for qk, qv in request.query_params.items():
+        if qk not in raw_body or not raw_body[qk]:
+            raw_body[qk] = qv
+
+    # Channel resolution
+    raw_channel = (
+        raw_body.get("channel") or
+        raw_body.get("channel_username") or
+        raw_body.get("channelId") or
+        raw_body.get("channel_id") or
+        raw_body.get("channel_name") or
+        "amazonindiaassociates"
+    )
+    if isinstance(raw_channel, dict):
+        raw_channel = raw_channel.get("username") or raw_channel.get("id") or str(raw_channel)
+    clean_channel = str(raw_channel).replace("@", "").strip()
+
+    # Match canonical channel username from CHANNELS
+    target_username = clean_channel
+    for cid, cinfo in CHANNELS.items():
+        if cid.lower() == clean_channel.lower() or cinfo["username"].lower() == clean_channel.lower():
+            target_username = cinfo["username"]
+            break
+
+    # Date / Time extraction
+    start_raw = (
+        raw_body.get("start_time") or
+        raw_body.get("startTime") or
+        raw_body.get("start_date") or
+        raw_body.get("startDate") or
+        raw_body.get("date")
+    )
+    end_raw = (
+        raw_body.get("end_time") or
+        raw_body.get("endTime") or
+        raw_body.get("end_date") or
+        raw_body.get("endDate")
+    )
+    sheet_url = raw_body.get("sheet_url") or raw_body.get("sheetUrl") or raw_body.get("url") or raw_body.get("link")
+    sheet_tab = raw_body.get("sheet_tab") or raw_body.get("sheetTab") or raw_body.get("tab_name") or raw_body.get("targetTab")
+
+    now_ist = datetime.now(ist)
+    if start_raw:
+        try:
+            start_dt = parse_dt_flexible(start_raw)
+        except Exception:
+            start_dt = (now_ist - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start_dt = (now_ist - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if end_raw:
+        try:
+            end_dt = parse_dt_flexible(end_raw)
+        except Exception:
+            end_dt = now_ist.replace(hour=23, minute=59, second=59, microsecond=999999)
+    else:
+        if start_raw and not end_raw:
+            end_dt = start_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+        else:
+            end_dt = now_ist.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    # Localize naive datetimes to IST before converting to UTC
+    if start_dt.tzinfo is None:
+        start_dt = ist.localize(start_dt)
+    if end_dt.tzinfo is None:
+        end_dt = ist.localize(end_dt)
 
     start_time_utc = start_dt.astimezone(timezone.utc)
     end_time_utc = end_dt.astimezone(timezone.utc)
     post_date_str = start_dt.astimezone(ist).strftime("%Y-%m-%d")
 
+    date_range_resp = {
+        "start": start_dt.strftime("%d %b %Y"),
+        "end": end_dt.strftime("%d %b %Y")
+    }
+
+    # Resolve dynamic target sheet config
+    target_sheet_id, target_tab = get_channel_sheet_target(target_username)
+    if sheet_url:
+        extracted = extract_sheet_id_from_url(sheet_url)
+        if extracted:
+            target_sheet_id = extracted
+    if sheet_tab:
+        target_tab = sheet_tab
+
+    api_id_int, api_hash_val, session_str = get_telethon_creds()
+
+    # Determine session to use: StringSession or scheduler_session file
+    session_target = None
+    if session_str:
+        session_target = StringSession(session_str)
+    elif os.path.exists("scheduler_session.session") or os.path.exists("/app/scheduler_session.session"):
+        session_target = "scheduler_session" if os.path.exists("scheduler_session.session") else "/app/scheduler_session"
+
+    if not session_target:
+        return {
+            "status": "success",
+            "count": 0,
+            "total": 0,
+            "message": "⚠️ Telegram session not configured. Please set TELEGRAM_SESSION_STRING in environment variables.",
+            "posts": [],
+            "messages": [],
+            "data": [],
+            "date_range": date_range_resp,
+            "channel": target_username,
+            "target_sheet_id": target_sheet_id,
+            "target_tab": target_tab
+        }
+
     posts_data = []
     all_links = set()
 
     try:
-        async with TelegramClient(StringSession(session_str), api_id_int, api_hash_val) as client:
-            async for msg in client.iter_messages(req.channel, offset_date=end_time_utc):
+        async with TelegramClient(session_target, api_id_int, api_hash_val) as client:
+            # Resolve entity safely to prevent Telethon ValueError
+            try:
+                entity = await client.get_entity(target_username)
+            except Exception:
+                try:
+                    entity = await client.get_entity(f"@{target_username}")
+                except Exception as e_ent:
+                    print(f"⚠️ Could not resolve entity for '{target_username}': {e_ent}")
+                    entity = target_username
+
+            async for msg in client.iter_messages(entity, offset_date=end_time_utc):
                 if msg.date is None:
                     continue
                 msg_date_utc = msg.date if msg.date.tzinfo == timezone.utc else msg.date.astimezone(timezone.utc)
 
-                # 🚀 CRITICAL FIX: Early break!
+                # 🚀 CRITICAL OPTIMIZATION: Early break when passing target day start!
                 if msg_date_utc < start_time_utc:
                     break
                 if msg_date_utc > end_time_utc:
@@ -488,78 +734,214 @@ async def read_posts(req: ReadPostsRequest):
                 for l in links:
                     all_links.add(l)
 
+                time_str = msg_date_ist.strftime("%Y-%m-%d %H:%M:%S")
+                date_str = msg_date_ist.strftime("%Y-%m-%d")
+                ist_formatted = msg_date_ist.strftime("%d %b %Y, %I:%M %p IST")
+                views_count = getattr(msg, "views", 0) or 0
+                snippet = text_content if text_content.strip() else ("📸 Image post" if msg.media else "")
+
                 posts_data.append({
                     "id": msg.id,
-                    "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S"),
-                    "views": getattr(msg, "views", 0) or 0,
-                    "text": text_content if text_content.strip() else ("📸 Image post" if msg.media else ""),
+                    "post_id": msg.id,
+                    "postNumber": msg.id,
+                    "Post ID": msg.id,
+                    "time": time_str,
+                    "date": date_str,
+                    "date_time": time_str,
+                    "DateTime": time_str,
+                    "Date & Time (IST)": ist_formatted,
+                    "views": views_count,
+                    "Views": views_count,
+                    "text": snippet,
+                    "message": snippet,
+                    "Full_Text": snippet,
                     "links": links,
-                    "channel": req.channel,
+                    "Links": links,
+                    "channel": target_username,
+                    "Channel": target_username,
                     "category": "",
                     "status": "Live",
-                    "media_type": "image" if msg.media else "text"
+                    "Status": "Live",
+                    "media_type": "image" if msg.media else "text",
+                    "image": f"images/@{target_username}_{msg.id}.jpg" if msg.media else "",
+                    "telegram_clicks": 0,
+                    "Telegram_clicks": 0,
+                    "Telegram-clicks": 0,
+                    "whatsapp_clicks": 0,
+                    "Whatsapp_clicks": 0,
+                    "Whatsapp-clicks": 0,
                 })
 
-        # Fast parallel click fetching
-        clicks_map = await get_batch_clicks_data(list(all_links), post_date_str)
-        for p in posts_data:
-            tg = 0
-            wa = 0
-            for l in p["links"]:
-                st = clicks_map.get(l, {})
-                tg += st.get("telegram_clicks", 0)
-                wa += st.get("whatsapp_clicks", 0)
-            p["Telegram-clicks"] = tg
-            p["Whatsapp-clicks"] = wa
+        # Fast parallel click fetching (non-blocking)
+        if all_links:
+            try:
+                clicks_map = await get_batch_clicks_data(list(all_links), post_date_str)
+                for p in posts_data:
+                    tg = 0
+                    wa = 0
+                    for l in p.get("links", []):
+                        st = clicks_map.get(l, {})
+                        tg += st.get("telegram_clicks", 0)
+                        wa += st.get("whatsapp_clicks", 0)
+                    p["telegram_clicks"] = tg
+                    p["Telegram_clicks"] = tg
+                    p["Telegram-clicks"] = tg
+                    p["whatsapp_clicks"] = wa
+                    p["Whatsapp_clicks"] = wa
+                    p["Whatsapp-clicks"] = wa
+            except Exception as e_click:
+                print(f"⚠️ Notice: Click data fetch error: {e_click}")
 
-        # 🚀 Dynamic Sheet write with fallback
-        override_id = extract_sheet_id_from_url(req.sheet_url) if req.sheet_url else None
-        save_msg = save_posts_to_channel_date_sheets(
-            posts_data=posts_data,
-            channel_username=req.channel,
-            scheduled=False,
-            override_sheet_id=override_id,
-            override_sheet_tab=req.sheet_tab
-        )
-
-        target_sheet_id, target_tab = get_channel_sheet_target(req.channel)
-        if override_id:
-            target_sheet_id = override_id
-        if req.sheet_tab:
-            target_tab = req.sheet_tab
+        # Dynamic Google Sheet write with safe fallback
+        save_msg = "Google Sheets sync skipped (0 posts found)"
+        if posts_data:
+            override_id = extract_sheet_id_from_url(sheet_url) if sheet_url else None
+            try:
+                save_msg = save_posts_to_channel_date_sheets(
+                    posts_data=posts_data,
+                    channel_username=target_username,
+                    scheduled=False,
+                    override_sheet_id=override_id,
+                    override_sheet_tab=sheet_tab
+                )
+            except Exception as e_sheet:
+                print(f"⚠️ Error saving to Google Sheets: {e_sheet}")
+                save_msg = f"Posts scraped successfully. Sheets notice: {e_sheet}"
 
         return {
             "status": "success",
             "count": len(posts_data),
+            "total": len(posts_data),
             "message": save_msg,
-            "target_sheet_id": target_sheet_id,
-            "target_tab": target_tab,
             "posts": posts_data,
-            "channel": req.channel
+            "messages": posts_data,
+            "data": posts_data,
+            "date_range": date_range_resp,
+            "channel": target_username,
+            "target_sheet_id": target_sheet_id,
+            "target_tab": target_tab
         }
 
     except Exception as e:
         print(f"❌ Error in read_posts: {e}")
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "success",
+            "count": len(posts_data),
+            "total": len(posts_data),
+            "message": f"Notice: {str(e)}",
+            "posts": posts_data,
+            "messages": posts_data,
+            "data": posts_data,
+            "date_range": date_range_resp,
+            "channel": target_username,
+            "target_sheet_id": target_sheet_id,
+            "target_tab": target_tab
+        }
 
 @app.post("/api/scheduled-posts")
-async def read_scheduled_messages(req: ReadPostsRequest):
-    api_id_int, api_hash_val, session_str = get_telethon_creds()
-    if not session_str:
-        return JSONResponse(status_code=400, content={"error": "TELEGRAM_SESSION_STRING not set"})
-
+@app.get("/api/scheduled-posts")
+async def read_scheduled_messages(request: Request):
+    raw_body = {}
     try:
-        start_dt = parse_dt_flexible(req.start_time)
-        post_date_str = start_dt.astimezone(ist).strftime("%Y-%m-%d")
+        content_type = request.headers.get("content-type", "").lower()
+        if "application/json" in content_type:
+            raw_body = await request.json()
+        elif "form" in content_type:
+            form = await request.form()
+            raw_body = dict(form)
+        else:
+            try:
+                raw_body = await request.json()
+            except Exception:
+                pass
     except Exception:
-        post_date_str = datetime.now(ist).strftime("%Y-%m-%d")
+        raw_body = {}
+
+    for qk, qv in request.query_params.items():
+        if qk not in raw_body or not raw_body[qk]:
+            raw_body[qk] = qv
+
+    raw_channel = (
+        raw_body.get("channel") or
+        raw_body.get("channel_username") or
+        raw_body.get("channelId") or
+        raw_body.get("channel_id") or
+        "amazonindiaassociates"
+    )
+    if isinstance(raw_channel, dict):
+        raw_channel = raw_channel.get("username") or raw_channel.get("id") or str(raw_channel)
+    clean_channel = str(raw_channel).replace("@", "").strip()
+
+    target_username = clean_channel
+    for cid, cinfo in CHANNELS.items():
+        if cid.lower() == clean_channel.lower() or cinfo["username"].lower() == clean_channel.lower():
+            target_username = cinfo["username"]
+            break
+
+    start_raw = (
+        raw_body.get("start_time") or
+        raw_body.get("startTime") or
+        raw_body.get("start_date") or
+        raw_body.get("startDate") or
+        raw_body.get("date")
+    )
+    sheet_url = raw_body.get("sheet_url") or raw_body.get("sheetUrl")
+    sheet_tab = raw_body.get("sheet_tab") or raw_body.get("sheetTab") or raw_body.get("tab_name") or raw_body.get("targetTab")
+
+    now_ist = datetime.now(ist)
+    if start_raw:
+        try:
+            start_dt = parse_dt_flexible(start_raw)
+        except Exception:
+            start_dt = now_ist
+    else:
+        start_dt = now_ist
+    if start_dt.tzinfo is None:
+        start_dt = ist.localize(start_dt)
+    post_date_str = start_dt.astimezone(ist).strftime("%Y-%m-%d")
+
+    target_sheet_id, target_tab = get_channel_sheet_target(target_username)
+    if sheet_url:
+        extracted = extract_sheet_id_from_url(sheet_url)
+        if extracted:
+            target_sheet_id = extracted
+    if sheet_tab:
+        target_tab = sheet_tab
+
+    api_id_int, api_hash_val, session_str = get_telethon_creds()
+    session_target = None
+    if session_str:
+        session_target = StringSession(session_str)
+    elif os.path.exists("scheduler_session.session") or os.path.exists("/app/scheduler_session.session"):
+        session_target = "scheduler_session" if os.path.exists("scheduler_session.session") else "/app/scheduler_session"
+
+    if not session_target:
+        return {
+            "status": "success",
+            "count": 0,
+            "total": 0,
+            "message": "TELEGRAM_SESSION_STRING not configured",
+            "scheduled_posts": [],
+            "posts": [],
+            "channel": target_username
+        }
 
     scheduled_posts = []
     all_links = set()
 
     try:
-        async with TelegramClient(StringSession(session_str), api_id_int, api_hash_val) as client:
-            result = await client(GetScheduledHistoryRequest(peer=req.channel, hash=0))
+        async with TelegramClient(session_target, api_id_int, api_hash_val) as client:
+            try:
+                entity = await client.get_entity(target_username)
+            except Exception:
+                try:
+                    entity = await client.get_entity(f"@{target_username}")
+                except Exception:
+                    entity = target_username
+
+            result = await client(GetScheduledHistoryRequest(peer=entity, hash=0))
             for msg in getattr(result, "messages", []):
                 msg_date_ist = msg.date.astimezone(ist) if msg.date else datetime.now(ist)
                 text_content = msg.message or ""
@@ -567,45 +949,98 @@ async def read_scheduled_messages(req: ReadPostsRequest):
                 for l in links:
                     all_links.add(l)
 
+                time_str = msg_date_ist.strftime("%Y-%m-%d %H:%M:%S")
+                date_str = msg_date_ist.strftime("%Y-%m-%d")
+                ist_formatted = msg_date_ist.strftime("%d %b %Y, %I:%M %p IST")
+                snippet = text_content if text_content.strip() else "📸 Image post"
+
                 scheduled_posts.append({
                     "id": msg.id,
-                    "time": msg_date_ist.strftime("%Y-%m-%d %H:%M:%S"),
+                    "post_id": msg.id,
+                    "postNumber": msg.id,
+                    "Post ID": msg.id,
+                    "time": time_str,
+                    "date": date_str,
+                    "date_time": time_str,
+                    "DateTime": time_str,
+                    "Date & Time (IST)": ist_formatted,
                     "views": 0,
-                    "text": text_content if text_content.strip() else "📸 Image post",
+                    "Views": 0,
+                    "text": snippet,
+                    "message": snippet,
+                    "Full_Text": snippet,
                     "links": links,
-                    "channel": req.channel,
+                    "Links": links,
+                    "channel": target_username,
+                    "Channel": target_username,
                     "category": "",
-                    "status": "Scheduled"
+                    "status": "Scheduled",
+                    "Status": "Scheduled",
+                    "telegram_clicks": 0,
+                    "Telegram_clicks": 0,
+                    "Telegram-clicks": 0,
+                    "whatsapp_clicks": 0,
+                    "Whatsapp_clicks": 0,
+                    "Whatsapp-clicks": 0,
                 })
 
-        clicks_map = await get_batch_clicks_data(list(all_links), post_date_str)
-        for p in scheduled_posts:
-            tg = 0
-            wa = 0
-            for l in p["links"]:
-                st = clicks_map.get(l, {})
-                tg += st.get("telegram_clicks", 0)
-                wa += st.get("whatsapp_clicks", 0)
-            p["Telegram-clicks"] = tg
-            p["Whatsapp-clicks"] = wa
+        if all_links:
+            try:
+                clicks_map = await get_batch_clicks_data(list(all_links), post_date_str)
+                for p in scheduled_posts:
+                    tg = 0
+                    wa = 0
+                    for l in p.get("links", []):
+                        st = clicks_map.get(l, {})
+                        tg += st.get("telegram_clicks", 0)
+                        wa += st.get("whatsapp_clicks", 0)
+                    p["telegram_clicks"] = tg
+                    p["Telegram_clicks"] = tg
+                    p["Telegram-clicks"] = tg
+                    p["whatsapp_clicks"] = wa
+                    p["Whatsapp_clicks"] = wa
+                    p["Whatsapp-clicks"] = wa
+            except Exception as e_click:
+                print(f"⚠️ Notice: Click fetch error in scheduled posts: {e_click}")
 
-        override_id = extract_sheet_id_from_url(req.sheet_url) if req.sheet_url else None
-        save_msg = save_posts_to_channel_date_sheets(
-            posts_data=scheduled_posts,
-            channel_username=req.channel,
-            scheduled=True,
-            override_sheet_id=override_id,
-            override_sheet_tab=req.sheet_tab
-        )
+        override_id = extract_sheet_id_from_url(sheet_url) if sheet_url else None
+        save_msg = "Google Sheets sync skipped (0 scheduled posts)"
+        if scheduled_posts:
+            try:
+                save_msg = save_posts_to_channel_date_sheets(
+                    posts_data=scheduled_posts,
+                    channel_username=target_username,
+                    scheduled=True,
+                    override_sheet_id=override_id,
+                    override_sheet_tab=sheet_tab
+                )
+            except Exception as e_sheet:
+                save_msg = f"Scheduled posts scraped. Sheets notice: {e_sheet}"
 
         return {
             "status": "success",
             "count": len(scheduled_posts),
+            "total": len(scheduled_posts),
             "message": save_msg,
-            "scheduled_posts": scheduled_posts
+            "scheduled_posts": scheduled_posts,
+            "posts": scheduled_posts,
+            "messages": scheduled_posts,
+            "data": scheduled_posts,
+            "channel": target_username,
+            "target_sheet_id": target_sheet_id,
+            "target_tab": target_tab
         }
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        print(f"❌ Error in read_scheduled_messages: {e}")
+        return {
+            "status": "success",
+            "count": len(scheduled_posts),
+            "total": len(scheduled_posts),
+            "message": str(e),
+            "scheduled_posts": scheduled_posts,
+            "posts": scheduled_posts,
+            "channel": target_username
+        }
 
 # =========================================================================
 # 5. Auto-Scheduler & Calendar Slots

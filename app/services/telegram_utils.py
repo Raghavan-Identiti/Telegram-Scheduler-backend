@@ -47,9 +47,38 @@ CHANNELS = {
     }
 }
 
-api_id = int(os.getenv("TELEGRAM_API_ID", "2040"))
-api_hash = os.getenv("TELEGRAM_API_HASH", "")
-session_string = os.getenv("TELEGRAM_SESSION_STRING", "")
+def get_telethon_creds() -> Tuple[int, str, str]:
+    raw_id = (
+        os.getenv("TELEGRAM_API_ID") or
+        os.getenv("API_ID") or
+        os.getenv("TG_API_ID") or
+        "2040"
+    )
+    try:
+        api_id_int = int(str(raw_id).strip())
+    except Exception:
+        api_id_int = 2040
+
+    api_hash_val = (
+        os.getenv("TELEGRAM_API_HASH") or
+        os.getenv("API_HASH") or
+        os.getenv("TG_API_HASH") or
+        ""
+    ).strip()
+
+    session_str = (
+        os.getenv("TELEGRAM_SESSION_STRING") or
+        os.getenv("SESSION_STRING") or
+        os.getenv("STRING_SESSION") or
+        os.getenv("TELEGRAM_SESSION") or
+        os.getenv("TELEGRAM_STRING_SESSION") or
+        os.getenv("TELETHON_SESSION") or
+        ""
+    ).strip()
+
+    return api_id_int, api_hash_val, session_str
+
+api_id, api_hash, session_string = get_telethon_creds()
 
 gc: Optional[gspread.Client] = None
 sheets_available = False
@@ -129,15 +158,24 @@ def get_channel_sheet_target(channel_username: str) -> Tuple[str, str]:
     channel_sheets = settings.get("channel_sheets", {})
 
     matched_config = None
+    # 1. Exact or normalized key matching
     for k, v in channel_sheets.items():
-        if k.replace("@", "").strip().lower() == clean_username:
+        k_clean = k.replace("@", "").strip().lower()
+        if k_clean == clean_username or k_clean == clean_username.replace("_", "").replace("-", ""):
             matched_config = v
             break
 
+    # 2. Match against CHANNELS map
     default_tab = clean_username
     for cid, data in CHANNELS.items():
-        if data["username"].lower() == clean_username:
+        if data["username"].lower() == clean_username or cid.lower() == clean_username:
             default_tab = data["sheet_name"]
+            if not matched_config:
+                for k, v in channel_sheets.items():
+                    k_clean = k.replace("@", "").strip().lower()
+                    if k_clean == cid.lower() or k_clean == data["username"].lower():
+                        matched_config = v
+                        break
             break
 
     if matched_config:
@@ -151,7 +189,7 @@ def get_channel_sheet_target(channel_username: str) -> Tuple[str, str]:
             default_tab
         )
         if sid and sid.strip():
-            return sid.strip(), tab.strip()
+            return sid.strip(), (tab or default_tab).strip()
 
     return DEFAULT_SHEET_ID, default_tab
 
@@ -282,7 +320,7 @@ def save_posts_to_channel_date_sheets(
     if not sheets_available or not gc:
         initialize_google_sheets()
         if not sheets_available or not gc:
-            return "Google Sheets not authorized"
+            return "Google Sheets service account not authorized. Scraped posts returned."
 
     if not posts_data:
         return "No posts to write."
@@ -296,6 +334,11 @@ def save_posts_to_channel_date_sheets(
         target_sheet_id = target_sheet_id or dyn_id
         target_tab_name = target_tab_name or dyn_tab
 
+    target_sheet_id = (target_sheet_id or DEFAULT_SHEET_ID).strip()
+    target_tab_name = (target_tab_name or "Posts").strip()
+    if not target_tab_name:
+        target_tab_name = "Posts"
+
     # 2. Try Opening Dynamic Sheet; Fallback to Default
     workbook = None
     used_fallback = False
@@ -303,15 +346,15 @@ def save_posts_to_channel_date_sheets(
     try:
         workbook = gc.open_by_key(target_sheet_id)
     except Exception as e:
-        print(f"⚠️ Could not open dynamic sheet '{target_sheet_id}': {e}. Falling back to default...")
+        print(f"⚠️ Could not open dynamic sheet '{target_sheet_id}': {e}. Falling back to default '{DEFAULT_SHEET_ID}'...")
         try:
             workbook = gc.open_by_key(DEFAULT_SHEET_ID)
             used_fallback = True
         except Exception as e2:
-            return f"❌ Failed to open sheet: {e2}"
+            return f"Notice: Could not access Google Sheets ({e2}). Ensure sheet is shared with {service_account_email}"
 
     if not workbook:
-        return "❌ Could not access Google Sheets"
+        return "Notice: Google Sheets not accessible"
 
     try:
         try:
@@ -323,14 +366,15 @@ def save_posts_to_channel_date_sheets(
 
         rows_to_insert = []
         for post in posts_data:
-            time_val = str(post.get("time", ""))
-            views_val = post.get("views", 0)
-            tg_clicks = post.get("Telegram-clicks", 0)
-            wa_clicks = post.get("Whatsapp-clicks", 0)
-            links_val = ", ".join(post.get("links", []))
-            text_val = str(post.get("text", "")).replace("\n", " ").strip()[:500]
-            status_val = "Scheduled" if scheduled else post.get("status", "Live")
-            post_id = post.get("id", "")
+            time_val = str(post.get("time") or post.get("date_time") or post.get("date") or "")
+            views_val = post.get("views") or post.get("Views") or 0
+            tg_clicks = post.get("Telegram-clicks") or post.get("telegram_clicks") or post.get("Telegram_clicks") or 0
+            wa_clicks = post.get("Whatsapp-clicks") or post.get("whatsapp_clicks") or post.get("Whatsapp_clicks") or 0
+            links_list = post.get("links") or post.get("Links") or []
+            links_val = ", ".join(links_list) if isinstance(links_list, list) else str(links_list)
+            text_val = str(post.get("text") or post.get("message") or post.get("Full_Text") or "").replace("\n", " ").strip()[:500]
+            status_val = "Scheduled" if scheduled else str(post.get("status") or "Live")
+            post_id = str(post.get("id") or post.get("post_id") or post.get("postNumber") or "")
 
             rows_to_insert.append([
                 post_id,
@@ -344,12 +388,12 @@ def save_posts_to_channel_date_sheets(
             ])
 
         ws.append_rows(rows_to_insert, value_input_option="USER_ENTERED")
-        fallback_note = " (Fallback default sheet used)" if used_fallback else ""
-        return f"✅ Batch wrote {len(rows_to_insert)} rows to '{target_sheet_id}' [{target_tab_name}]{fallback_note}"
+        fallback_note = " (Fallback default sheet used - share new sheet with editor rights)" if used_fallback else ""
+        return f"✅ Saved {len(rows_to_insert)} posts to '{target_sheet_id}' [{target_tab_name}]{fallback_note}"
 
     except Exception as e:
         print(f"❌ Error writing batch rows: {e}")
-        return f"Error writing: {e}"
+        return f"Posts scraped, notice writing to Google Sheet: {e}"
 
 async def send_telegram_message(
     image_path: Optional[str],

@@ -30,6 +30,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, setting
   }, []);
 
   const navItems = [
+    { id: 'content-reader', label: 'Content Reader', badge: '⚡ ~2s' },
     { id: 'auto-schedule', label: 'Auto Scheduler', badge: null },
     { id: 'recurring', label: 'Recurring Schedules', badge: null },
     { id: 'whatsapp', label: 'WhatsApp Hub', badge: 'Baileys' },

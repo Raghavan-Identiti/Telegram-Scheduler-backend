@@ -85,6 +85,16 @@ def load_settings() -> Dict[str, Any]:
             print(f"⚠️ Error reading settings: {e}")
     return {"auto_fetch_enabled": True, "channel_sheets": {}}
 
+def save_settings(settings: Dict[str, Any]) -> None:
+    filepath = get_settings_file_path()
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2)
+        print(f"💾 Settings saved successfully to {filepath}")
+    except Exception as e:
+        print(f"⚠️ Error saving settings to {filepath}: {e}")
+
 def extract_sheet_id_from_url(url_or_id: str) -> str:
     if not url_or_id:
         return ""

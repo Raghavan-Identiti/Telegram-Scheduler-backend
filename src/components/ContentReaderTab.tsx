@@ -57,24 +57,21 @@ export const ContentReaderTab: React.FC<ContentReaderTabProps> = ({
     return new Date().toISOString().split('T')[0];
   });
 
-  // Dynamic sheet overrides
+  // Dynamic channel sheet config
   const channelConfig = settings.channel_sheets[selectedChannel] || {
     sheet_id: '',
     sheet_url: '',
-    sheet_tab: CHANNELS[selectedChannel]?.sheetName || selectedChannel,
+    sheet_tab: '',
   };
   const [customSheetUrl, setCustomSheetUrl] = useState<string>(channelConfig.sheet_url || '');
-  const [customSheetTab, setCustomSheetTab] = useState<string>(channelConfig.sheet_tab || '');
 
   // Keep custom sheet in sync if channel changes
   useEffect(() => {
     const conf = settings.channel_sheets[selectedChannel];
     if (conf) {
       setCustomSheetUrl(conf.sheet_url || '');
-      setCustomSheetTab(conf.sheet_tab || CHANNELS[selectedChannel]?.sheetName || selectedChannel);
     } else {
       setCustomSheetUrl('');
-      setCustomSheetTab(CHANNELS[selectedChannel]?.sheetName || selectedChannel);
     }
   }, [selectedChannel, settings.channel_sheets]);
 
@@ -117,9 +114,6 @@ export const ContentReaderTab: React.FC<ContentReaderTabProps> = ({
 
       if (customSheetUrl.trim()) {
         payload.sheet_url = customSheetUrl.trim();
-      }
-      if (customSheetTab.trim()) {
-        payload.sheet_tab = customSheetTab.trim();
       }
 
       const response = await fetch('/api/read-posts', {
@@ -309,38 +303,37 @@ export const ContentReaderTab: React.FC<ContentReaderTabProps> = ({
           <label className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
             <span className="flex items-center gap-1.5">
               <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-              <span>Target Google Sheet (Dynamic)</span>
+              <span>Channel Google Sheet</span>
             </span>
-            <span className="text-[10px] text-emerald-400 font-normal">Active Link</span>
+            <span className="text-[10px] text-emerald-400 font-normal">Dedicated Sheet Link</span>
           </label>
 
-          <input
-            type="text"
-            value={customSheetUrl}
-            onChange={e => setCustomSheetUrl(e.target.value)}
-            placeholder="Google Sheet URL or ID (optional override)"
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
-          />
-
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
             <input
               type="text"
-              value={customSheetTab}
-              onChange={e => setCustomSheetTab(e.target.value)}
-              placeholder="Tab name (e.g. Amazon_India_Associates)"
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
+              value={customSheetUrl}
+              onChange={e => setCustomSheetUrl(e.target.value)}
+              placeholder="Google Sheet URL or ID for this channel"
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-emerald-500"
             />
             {customSheetUrl && (
               <a
                 href={customSheetUrl.startsWith('http') ? customSheetUrl : `https://docs.google.com/spreadsheets/d/${customSheetUrl}`}
                 target="_blank"
                 rel="noreferrer"
-                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg"
-                title="Open in Google Sheets"
+                className="p-2 bg-slate-800 hover:bg-slate-700 text-emerald-400 rounded-lg shrink-0 border border-slate-700"
+                title="Open Google Sheet in new tab"
               >
                 <ExternalLink className="w-4 h-4" />
               </a>
             )}
+          </div>
+
+          <div className="p-2.5 bg-emerald-950/20 border border-emerald-500/20 rounded-lg text-[11px] text-emerald-300/90 flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              Each date has its individual subsheet tab at the bottom (e.g. <strong>17th Oct</strong>, <strong>16th Oct</strong>). When scraping a date range, each date is cleanly synced into its own subsheet!
+            </span>
           </div>
         </div>
       </div>

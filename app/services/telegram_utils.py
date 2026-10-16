@@ -7,9 +7,10 @@ import pandas as pd
 from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 import re
 from typing import Dict, List, Any, Optional, Tuple
+from dateutil import parser
 import gspread
 from google.oauth2 import service_account
 import pytz
@@ -304,6 +305,92 @@ def get_blocked_times_from_sheet(channels: List[str]) -> List[datetime]:
         print(f"⚠️ Error reading blocked times from sheet: {e}")
     return blocked
 
+def get_ordinal_suffix(day: int) -> str:
+    if 11 <= day <= 13:
+        return "th"
+    return {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+
+def get_date_tab_title(d: date) -> str:
+    """Standard date tab format: e.g. '17th Oct'"""
+    day = d.day
+    suffix = get_ordinal_suffix(day)
+    month_abbr = d.strftime("%b")
+    return f"{day}{suffix} {month_abbr}"
+
+def get_date_candidates(d: date) -> List[str]:
+    """Generate variations of the date name to find existing subsheets"""
+    day = d.day
+    suffix = get_ordinal_suffix(day)
+    m_abbr = d.strftime("%b")
+    m_full = d.strftime("%B")
+    year = d.year
+    return [
+        f"{day}{suffix} {m_abbr}",          # 17th Oct
+        f"{day} {m_abbr}",                  # 17 Oct
+        f"{day}{suffix}_{m_abbr}",          # 17th_Oct
+        f"{day}_{m_abbr}",                  # 17_Oct
+        f"{day}{suffix} {m_abbr} {year}",   # 17th Oct 2026
+        f"{day} {m_abbr} {year}",           # 17 Oct 2026
+        f"{day}{suffix} {m_full}",          # 17th October
+        f"{day} {m_full}",                  # 17 October
+        d.strftime("%Y-%m-%d"),             # 2026-10-17
+        d.strftime("%d-%m-%Y"),             # 17-10-2026
+        d.strftime("%d-%b-%Y"),             # 17-Oct-2026
+        d.strftime("%d-%b"),                # 17-Oct
+        d.strftime("%d/%m/%Y"),             # 17/10/2026
+    ]
+
+def find_or_create_date_worksheet(workbook: gspread.Spreadsheet, d: date) -> gspread.Worksheet:
+    """Finds an existing subsheet for this date or creates a new one at the bottom"""
+    standard_title = get_date_tab_title(d)
+    candidates = [c.lower().replace(" ", "").replace("_", "").replace("-", "") for c in get_date_candidates(d)]
+    
+    # 1. Check existing worksheets in the spreadsheet
+    existing_sheets = workbook.worksheets()
+    for ws in existing_sheets:
+        norm_title = ws.title.lower().replace(" ", "").replace("_", "").replace("-", "")
+        if norm_title in candidates:
+            return ws
+
+    # 2. Check if the spreadsheet is brand new with an empty default "Sheet1"
+    if len(existing_sheets) == 1 and existing_sheets[0].title.lower() in ["sheet1", "sheet 1"]:
+        try:
+            if not existing_sheets[0].get_all_values():
+                existing_sheets[0].update_title(standard_title)
+                return existing_sheets[0]
+        except Exception:
+            pass
+
+    # 3. Create a new subsheet at the bottom
+    ws = workbook.add_worksheet(title=standard_title, rows=1000, cols=10)
+    return ws
+
+def extract_post_ist_date(post: Dict[str, Any]) -> date:
+    """Extracts the IST calendar date from a post record"""
+    for key in ["time", "date_time", "date", "DateTime", "Date & Time (IST)"]:
+        raw = post.get(key)
+        if raw:
+            if isinstance(raw, datetime):
+                dt = raw
+            elif isinstance(raw, date):
+                return raw
+            elif isinstance(raw, str) and raw.strip():
+                try:
+                    clean = raw.replace("IST", "").strip()
+                    dt = parser.parse(clean)
+                except Exception:
+                    continue
+            else:
+                continue
+
+            if dt.tzinfo is None:
+                dt = ist.localize(dt)
+            else:
+                dt = dt.astimezone(ist)
+            return dt.date()
+
+    return datetime.now(ist).date()
+
 def save_posts_to_channel_date_sheets(
     posts_data: List[Dict[str, Any]],
     channel_username: str,
@@ -312,9 +399,11 @@ def save_posts_to_channel_date_sheets(
     override_sheet_tab: Optional[str] = None
 ) -> str:
     """
-    ⚡ DYNAMIC BATCH SHEET WRITER ⚡
-    Uses dynamic Google Sheet from frontend settings, falls back to default if failed,
-    and batch writes in 1 single call!
+    ⚡ DYNAMIC CHANNEL SPREADSHEET & DAILY SUBSHEETS WRITER ⚡
+    - For each channel, there is ONE dedicated Google Sheet link (e.g. for @amazonindiaassociates).
+    - In that sheet, each day has its individual subsheet at the bottom (e.g. '17th Oct', '16th Oct').
+    - When running the Content Reader in a date range (date A to date B), posts are grouped by
+      date, and each date's posts are cleanly synced into their respective daily subsheet!
     """
     global gc, sheets_available
     if not sheets_available or not gc:
@@ -325,75 +414,121 @@ def save_posts_to_channel_date_sheets(
     if not posts_data:
         return "No posts to write."
 
-    # 1. Look up dynamic sheet ID and target tab
+    # 1. Determine Target Channel Spreadsheet ID
     target_sheet_id = override_sheet_id
-    target_tab_name = override_sheet_tab
+    if not target_sheet_id:
+        dyn_id, _ = get_channel_sheet_target(channel_username)
+        target_sheet_id = dyn_id or DEFAULT_SHEET_ID
 
-    if not target_sheet_id or not target_tab_name:
-        dyn_id, dyn_tab = get_channel_sheet_target(channel_username)
-        target_sheet_id = target_sheet_id or dyn_id
-        target_tab_name = target_tab_name or dyn_tab
+    target_sheet_id = str(target_sheet_id or DEFAULT_SHEET_ID).strip()
 
-    target_sheet_id = (target_sheet_id or DEFAULT_SHEET_ID).strip()
-    target_tab_name = (target_tab_name or "Posts").strip()
-    if not target_tab_name:
-        target_tab_name = "Posts"
-
-    # 2. Try Opening Dynamic Sheet; Fallback to Default
+    # 2. Open Target Channel Sheet; Fallback to Default if needed
     workbook = None
     used_fallback = False
 
     try:
         workbook = gc.open_by_key(target_sheet_id)
     except Exception as e:
-        print(f"⚠️ Could not open dynamic sheet '{target_sheet_id}': {e}. Falling back to default '{DEFAULT_SHEET_ID}'...")
+        print(f"⚠️ Could not open sheet '{target_sheet_id}': {e}. Falling back to default '{DEFAULT_SHEET_ID}'...")
         try:
             workbook = gc.open_by_key(DEFAULT_SHEET_ID)
             used_fallback = True
+            target_sheet_id = DEFAULT_SHEET_ID
         except Exception as e2:
-            return f"Notice: Could not access Google Sheets ({e2}). Ensure sheet is shared with {service_account_email}"
+            return f"Notice: Could not access Google Sheets ({e2}). Ensure sheet is shared with: {service_account_email}"
 
     if not workbook:
         return "Notice: Google Sheets not accessible"
 
-    try:
+    # 3. Group all scraped posts by their individual IST calendar date
+    posts_by_date: Dict[date, List[Dict[str, Any]]] = {}
+    for post in posts_data:
+        d = extract_post_ist_date(post)
+        posts_by_date.setdefault(d, []).append(post)
+
+    headers = [
+        "Post ID",
+        "Date & Time (IST)",
+        "Views",
+        "Telegram Clicks",
+        "WhatsApp Clicks",
+        "Links",
+        "Text",
+        "Status"
+    ]
+
+    synced_summary = []
+
+    # 4. Write each day's posts into that day's individual subsheet at the bottom
+    for d in sorted(posts_by_date.keys()):
+        day_posts = posts_by_date[d]
         try:
-            ws = workbook.worksheet(target_tab_name)
-        except gspread.WorksheetNotFound:
-            ws = workbook.add_worksheet(title=target_tab_name, rows=1000, cols=10)
-            headers = ["Post ID", "Date & Time (IST)", "Views", "Telegram Clicks", "WhatsApp Clicks", "Links", "Text", "Status"]
-            ws.append_row(headers)
+            ws = None
+            known_channel_names = [
+                channel_username.lower().replace("@", "").strip(),
+                "amazon_india_associates", "fashion_beauty", "home_kitchen", "consumables", "posts"
+            ]
+            # If user explicitly requested a specific non-channel tab name for a single date
+            if (
+                override_sheet_tab and
+                len(posts_by_date) == 1 and
+                override_sheet_tab.lower().strip() not in known_channel_names
+            ):
+                try:
+                    ws = workbook.worksheet(override_sheet_tab.strip())
+                except gspread.WorksheetNotFound:
+                    ws = workbook.add_worksheet(title=override_sheet_tab.strip(), rows=1000, cols=10)
 
-        rows_to_insert = []
-        for post in posts_data:
-            time_val = str(post.get("time") or post.get("date_time") or post.get("date") or "")
-            views_val = post.get("views") or post.get("Views") or 0
-            tg_clicks = post.get("Telegram-clicks") or post.get("telegram_clicks") or post.get("Telegram_clicks") or 0
-            wa_clicks = post.get("Whatsapp-clicks") or post.get("whatsapp_clicks") or post.get("Whatsapp_clicks") or 0
-            links_list = post.get("links") or post.get("Links") or []
-            links_val = ", ".join(links_list) if isinstance(links_list, list) else str(links_list)
-            text_val = str(post.get("text") or post.get("message") or post.get("Full_Text") or "").replace("\n", " ").strip()[:500]
-            status_val = "Scheduled" if scheduled else str(post.get("status") or "Live")
-            post_id = str(post.get("id") or post.get("post_id") or post.get("postNumber") or "")
+            if ws is None:
+                ws = find_or_create_date_worksheet(workbook, d)
 
-            rows_to_insert.append([
-                post_id,
-                time_val,
-                views_val,
-                tg_clicks,
-                wa_clicks,
-                links_val,
-                text_val,
-                status_val
-            ])
+            # Build rows to insert
+            rows_to_insert = []
+            for post in day_posts:
+                time_val = str(post.get("time") or post.get("date_time") or post.get("date") or "")
+                views_val = post.get("views") or post.get("Views") or 0
+                tg_clicks = post.get("Telegram-clicks") or post.get("telegram_clicks") or post.get("Telegram_clicks") or 0
+                wa_clicks = post.get("Whatsapp-clicks") or post.get("whatsapp_clicks") or post.get("Whatsapp_clicks") or 0
+                links_list = post.get("links") or post.get("Links") or []
+                links_val = ", ".join(links_list) if isinstance(links_list, list) else str(links_list)
+                text_val = str(post.get("text") or post.get("message") or post.get("Full_Text") or "").replace("\n", " ").strip()[:500]
+                status_val = "Scheduled" if scheduled else str(post.get("status") or "Live")
+                post_id = str(post.get("id") or post.get("post_id") or post.get("postNumber") or "")
 
-        ws.append_rows(rows_to_insert, value_input_option="USER_ENTERED")
-        fallback_note = " (Fallback default sheet used - share new sheet with editor rights)" if used_fallback else ""
-        return f"✅ Saved {len(rows_to_insert)} posts to '{target_sheet_id}' [{target_tab_name}]{fallback_note}"
+                rows_to_insert.append([
+                    post_id,
+                    time_val,
+                    views_val,
+                    tg_clicks,
+                    wa_clicks,
+                    links_val,
+                    text_val,
+                    status_val
+                ])
 
-    except Exception as e:
-        print(f"❌ Error writing batch rows: {e}")
-        return f"Posts scraped, notice writing to Google Sheet: {e}"
+            # Write headers and fresh rows in one clean update
+            full_table = [headers] + rows_to_insert
+            try:
+                ws.clear()
+                try:
+                    ws.update("A1", full_table, value_input_option="USER_ENTERED")
+                except TypeError:
+                    ws.update(full_table, value_input_option="USER_ENTERED")
+            except Exception as e_up:
+                print(f"⚠️ ws.update fallback for subsheet '{ws.title}': {e_up}")
+                try:
+                    ws.append_rows(rows_to_insert, value_input_option="USER_ENTERED")
+                except Exception as e_app:
+                    print(f"❌ Error appending rows to subsheet '{ws.title}': {e_app}")
+
+            synced_summary.append(f"{ws.title} ({len(rows_to_insert)} posts)")
+
+        except Exception as e_day:
+            print(f"❌ Error syncing date subsheet for date {d}: {e_day}")
+            synced_summary.append(f"{get_date_tab_title(d)} (notice: {e_day})")
+
+    fallback_note = " (Fallback default sheet used - share new sheet with editor rights)" if used_fallback else ""
+    return f"✅ Synced {len(posts_data)} posts into {len(synced_summary)} daily subsheets in Google Sheet: {', '.join(synced_summary)}{fallback_note}"
 
 async def send_telegram_message(
     image_path: Optional[str],

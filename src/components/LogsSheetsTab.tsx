@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileSpreadsheet,
   Settings,
@@ -388,7 +388,7 @@ export const LogsSheetsTab: React.FC<LogsSheetsTabProps> = ({
 
             <div className="flex items-center gap-2">
               <button
-                onClick={handleTestConnection}
+                onClick={() => handleTestConnection()}
                 disabled={isCheckingSheets}
                 className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-lg font-medium flex items-center gap-1.5 cursor-pointer"
               >
@@ -474,7 +474,7 @@ export const LogsSheetsTab: React.FC<LogsSheetsTabProps> = ({
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                     <div>
-                      <label className="text-slate-400 block mb-1">Google Sheet URL / ID</label>
+                      <label className="text-slate-400 block mb-1">Channel Google Sheet Link / ID</label>
                       <input
                         type="text"
                         value={conf.sheet_url}
@@ -484,12 +484,15 @@ export const LogsSheetsTab: React.FC<LogsSheetsTabProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="text-slate-400 block mb-1">Sheet Tab Name</label>
+                      <label className="text-slate-400 block mb-1 flex items-center justify-between">
+                        <span>Daily Subsheets (at bottom)</span>
+                        <span className="text-[10px] text-emerald-400 font-normal">Auto-created by date</span>
+                      </label>
                       <input
                         type="text"
-                        value={conf.sheet_tab}
+                        value={conf.sheet_tab || ''}
                         onChange={e => handleSheetConfigChange(chan.id, 'sheet_tab', e.target.value)}
-                        placeholder="e.g. Amazon_India_Associates"
+                        placeholder="Daily Subsheets (e.g. 17th Oct) or custom tab override"
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-blue-500"
                       />
                     </div>

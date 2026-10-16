@@ -109,16 +109,28 @@ export const ContentReaderTab: React.FC<ContentReaderTabProps> = ({
     }
   };
 
-  // Format date helper: "YYYY-MM-DD" -> "01 Jul 2026"
+  // Suffix helper (e.g. 1st, 2nd, 3rd, 15th)
+  const getOrdinalSuffix = (day: number): string => {
+    if (day >= 11 && day <= 13) return 'th';
+    switch (day % 10) {
+      case 1: return 'st';
+      case 2: return 'nd';
+      case 3: return 'rd';
+      default: return 'th';
+    }
+  };
+
+  // Format date helper: "YYYY-MM-DD" -> "15th Oct 2026", "1st Oct 2026"
   const formatDateToTabName = (dateStr: string): string => {
     try {
       const parts = dateStr.split('-');
       if (parts.length === 3) {
         const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-        const day = d.getDate().toString().padStart(2, '0');
+        const day = d.getDate();
+        const suffix = getOrdinalSuffix(day);
         const month = d.toLocaleString('en-US', { month: 'short' });
         const year = d.getFullYear();
-        return `${day} ${month} ${year}`;
+        return `${day}${suffix} ${month} ${year}`;
       }
     } catch {
       // fallback
@@ -148,9 +160,21 @@ export const ContentReaderTab: React.FC<ContentReaderTabProps> = ({
     return map;
   }, [posts, startDate]);
 
-  // Available date tabs
+  // Helper to parse "15th Oct 2026" to timestamp for proper chronological tab ordering
+  const parseTabNameToTime = (tabName: string): number => {
+    try {
+      const clean = tabName.replace(/(st|nd|rd|th)/i, '');
+      const t = Date.parse(clean);
+      if (!isNaN(t)) return t;
+    } catch {
+      // fallback
+    }
+    return 0;
+  };
+
+  // Available date tabs sorted chronologically
   const dateTabs = useMemo(() => {
-    return Object.keys(postsByDate).sort();
+    return Object.keys(postsByDate).sort((a, b) => parseTabNameToTime(a) - parseTabNameToTime(b));
   }, [postsByDate]);
 
   // Set default active tab

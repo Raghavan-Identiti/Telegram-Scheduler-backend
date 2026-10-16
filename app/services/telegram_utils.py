@@ -328,11 +328,15 @@ def get_ordinal_suffix(day: int) -> str:
     return {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
 
 def get_date_tab_title(d: date, scheduled: bool = False) -> str:
-    """Date tab format matching user Google Sheets: e.g. '01 Jul 2026' or '17 May 2026 - Scheduled Posts'"""
-    base_title = d.strftime("%d %b %Y")
-    if scheduled:
-        return f"{base_title} - Scheduled Posts"
-    return base_title
+    """
+    Date tab format: strictly the date with ordinal suffix.
+    e.g. '15th Oct 2026', '1st Oct 2026', '2nd Oct 2026'.
+    """
+    day = d.day
+    suffix = get_ordinal_suffix(day)
+    month = d.strftime("%b")
+    year = d.year
+    return f"{day}{suffix} {month} {year}"
 
 def get_date_candidates(d: date, scheduled: bool = False) -> List[str]:
     """Generate variations of the date name to find existing subsheets"""
@@ -344,24 +348,28 @@ def get_date_candidates(d: date, scheduled: bool = False) -> List[str]:
 
     suffix = get_ordinal_suffix(day)
     base_variants = [
-        f"{day_pad} {m_abbr} {year}",       # 01 Jul 2026
-        f"{day} {m_abbr} {year}",           # 1 Jul 2026
-        f"{day_pad}_{m_abbr}_{year}",       # 01_Jul_2026
-        f"{day}_{m_abbr}_{year}",           # 1_Jul_2026
-        f"{day_pad} {m_abbr}",              # 01 Jul
-        f"{day} {m_abbr}",                  # 1 Jul
-        f"{day}{suffix} {m_abbr}",          # 1st Jul
-        f"{day}{suffix} {m_abbr} {year}",   # 1st Jul 2026
-        f"{day_pad} {m_full} {year}",       # 01 July 2026
-        d.strftime("%Y-%m-%d"),             # 2026-07-01
-        d.strftime("%d-%m-%Y"),             # 01-07-2026
-        d.strftime("%d-%b-%Y"),             # 01-Jul-2026
+        f"{day}{suffix} {m_abbr} {year}",           # 15th Oct 2026 / 1st Oct 2026
+        f"{day}{suffix} {m_abbr.lower()} {year}",   # 15th oct 2026 / 1st oct 2026
+        f"{day}{suffix} {m_full} {year}",           # 15th October 2026
+        f"{day}{suffix} {m_full.lower()} {year}",   # 15th october 2026
+        f"{day}{suffix} {m_abbr}",                  # 15th Oct
+        f"{day}{suffix} {m_abbr.lower()}",          # 15th oct
+        f"{day_pad} {m_abbr} {year}",               # 15 Oct 2026 / 01 Oct 2026
+        f"{day} {m_abbr} {year}",                   # 15 Oct 2026 / 1 Oct 2026
+        f"{day_pad} {m_abbr.lower()} {year}",       # 15 oct 2026 / 01 oct 2026
+        f"{day} {m_abbr.lower()} {year}",           # 15 oct 2026 / 1 oct 2026
+        f"{day_pad}_{m_abbr}_{year}",               # 15_Oct_2026
+        f"{day}_{m_abbr}_{year}",                   # 15_Oct_2026
+        f"{day_pad} {m_abbr}",                      # 15 Oct
+        f"{day} {m_abbr}",                          # 15 Oct
+        f"{day_pad} {m_full} {year}",               # 15 October 2026
+        d.strftime("%Y-%m-%d"),                     # 2026-10-15
+        d.strftime("%d-%m-%Y"),                     # 15-10-2026
+        d.strftime("%d-%b-%Y"),                     # 15-Oct-2026
     ]
 
-    if scheduled:
-        scheduled_variants = [f"{v} - Scheduled Posts" for v in base_variants] + [f"{v} - Scheduled" for v in base_variants]
-        return scheduled_variants + base_variants
-    return base_variants
+    scheduled_variants = [f"{v} - Scheduled Posts" for v in base_variants] + [f"{v} - Scheduled" for v in base_variants]
+    return base_variants + scheduled_variants
 
 def find_or_create_date_worksheet(workbook: gspread.Spreadsheet, d: date, scheduled: bool = False) -> gspread.Worksheet:
     """Finds an existing subsheet for this date or creates a new one at the bottom"""
@@ -373,6 +381,13 @@ def find_or_create_date_worksheet(workbook: gspread.Spreadsheet, d: date, schedu
     for ws in existing_sheets:
         norm_title = ws.title.lower().replace(" ", "").replace("_", "").replace("-", "")
         if norm_title in candidates:
+            # If the title was in an older non-ordinal format (e.g. '01 Oct 2026' or '15 Oct 2026'),
+            # update it to the user's requested standard date format ('15th Oct 2026')
+            if norm_title != standard_title.lower().replace(" ", ""):
+                try:
+                    ws.update_title(standard_title)
+                except Exception:
+                    pass
             return ws
 
     # 2. Check if the spreadsheet is brand new with an empty default "Sheet1"
@@ -384,7 +399,7 @@ def find_or_create_date_worksheet(workbook: gspread.Spreadsheet, d: date, schedu
         except Exception:
             pass
 
-    # 3. Create a new subsheet at the bottom
+    # 3. Create a new subsheet at the bottom named strictly with the date
     ws = workbook.add_worksheet(title=standard_title, rows=1000, cols=20)
     return ws
 
@@ -492,9 +507,8 @@ def save_posts_to_channel_date_sheets(
         d = extract_post_ist_date(post)
         posts_by_date.setdefault(d, []).append(post)
 
-    # Exact headers from user screenshot (Columns A to J, with Col A empty spacer)
+    # Headers starting strictly at Column A matching user screenshot
     headers = [
-        "",
         "Post Number",
         "Time",
         "Status",
@@ -508,30 +522,13 @@ def save_posts_to_channel_date_sheets(
 
     synced_summary = []
 
-    # 4. Write each day's posts into that day's individual subsheet at the bottom
+    # 4. Write each day's posts into that day's individual date subsheet at the bottom
     for d in sorted(posts_by_date.keys()):
         day_posts = posts_by_date[d]
         try:
-            ws = None
-            known_channel_names = [
-                channel_username.lower().replace("@", "").strip(),
-                "amazon_india_associates", "fashion_beauty", "home_kitchen", "consumables", "posts"
-            ]
-            # If user explicitly requested a specific non-channel tab name for a single date
-            if (
-                override_sheet_tab and
-                len(posts_by_date) == 1 and
-                override_sheet_tab.lower().strip() not in known_channel_names
-            ):
-                try:
-                    ws = workbook.worksheet(override_sheet_tab.strip())
-                except gspread.WorksheetNotFound:
-                    ws = workbook.add_worksheet(title=override_sheet_tab.strip(), rows=1000, cols=20)
+            # Subsheet name is ALWAYS the date (never AMZ_TELEGRAM or generic channel name)
+            ws = find_or_create_date_worksheet(workbook, d, scheduled=scheduled)
 
-            if ws is None:
-                ws = find_or_create_date_worksheet(workbook, d, scheduled=scheduled)
-
-            # Build rows to insert exactly matching the screenshot
             rows_to_insert = []
             day_total_views = 0
             day_total_tg_clicks = 0
@@ -546,7 +543,6 @@ def save_posts_to_channel_date_sheets(
                 if not text_val:
                     text_val = "Image post (no text or links)"
 
-                # Separate telegram and whatsapp links or normalize
                 tg_links_list = post.get("telegram_links") or []
                 wa_links_list = post.get("whatsapp_links") or []
                 general_links = post.get("links") or post.get("Links") or []
@@ -568,30 +564,28 @@ def save_posts_to_channel_date_sheets(
                 day_total_wa_clicks += wa_clicks
 
                 rows_to_insert.append([
-                    "",                         # Col A: spacer
-                    post_num,                   # Col B: Post Number
-                    time_val,                   # Col C: Time
-                    status_val,                 # Col D: Status
-                    text_val,                   # Col E: Message
-                    tg_links_str,               # Col F: Telegram Links
-                    wa_links_str,               # Col G: WhatsApp Links
-                    views_val,                  # Col H: Views
-                    tg_clicks,                  # Col I: Telegram Clicks
-                    wa_clicks                   # Col J: WhatsApp Clicks
+                    post_num,                   # Col A: Post Number
+                    time_val,                   # Col B: Time
+                    status_val,                 # Col C: Status
+                    text_val,                   # Col D: Message
+                    tg_links_str,               # Col E: Telegram Links
+                    wa_links_str,               # Col F: WhatsApp Links
+                    views_val,                  # Col G: Views
+                    tg_clicks,                  # Col H: Telegram Clicks
+                    wa_clicks                   # Col I: WhatsApp Clicks
                 ])
 
-            # Bottom Total row exactly like the green row in the screenshot
+            # Bottom Total row matching Screenshot 1 (Total in Col F, Views in Col G, TG in Col H, WA in Col I)
             total_row = [
                 "",                             # Col A
                 "",                             # Col B
                 "",                             # Col C
                 "",                             # Col D
                 "",                             # Col E
-                "",                             # Col F
-                "Total",                        # Col G: Total label
-                day_total_views,                # Col H: Total Views sum
-                day_total_tg_clicks,            # Col I: Total TG clicks sum
-                day_total_wa_clicks             # Col J: Total WA clicks sum
+                "Total",                        # Col F: Total label
+                day_total_views,                # Col G: Total Views sum
+                day_total_tg_clicks,            # Col H: Total TG clicks sum
+                day_total_wa_clicks             # Col I: Total WA clicks sum
             ]
             rows_to_insert.append(total_row)
 
@@ -610,11 +604,10 @@ def save_posts_to_channel_date_sheets(
                 except Exception as e_app:
                     print(f"❌ Error appending rows to subsheet '{ws.title}': {e_app}")
 
-            # Try formatting the Total row with green highlight like the screenshot
+            # Highlight Total row cells (F to I) in light green (#93c47d) like in screenshot
             try:
                 total_row_idx = len(full_table)
-                # Google Sheets format background green (#93c47d) for G{total_row_idx}:J{total_row_idx}
-                ws.format(f"G{total_row_idx}:J{total_row_idx}", {
+                ws.format(f"F{total_row_idx}:I{total_row_idx}", {
                     "backgroundColor": {
                         "red": 0.576,
                         "green": 0.768,
@@ -626,7 +619,7 @@ def save_posts_to_channel_date_sheets(
                     }
                 })
             except Exception:
-                pass  # formatting is optional styling, don't fail if permissions don't allow
+                pass
 
             synced_summary.append(f"{ws.title} ({len(day_posts)} posts)")
 

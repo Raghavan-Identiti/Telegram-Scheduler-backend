@@ -33,6 +33,7 @@ from app.services.telegram_utils import (
     initialize_google_sheets,
     sheets_available,
     save_posts_to_channel_date_sheets,
+    scrape_public_channel_posts,
     extract_links,
     extract_sheet_id_from_url,
     get_channel_sheet_target,
@@ -40,7 +41,8 @@ from app.services.telegram_utils import (
     save_settings,
     DEFAULT_SHEET_ID,
     gc,
-    service_account_email
+    service_account_email,
+    SCOPES
 )
 from app.services.clicksFind import get_batch_clicks_data, get_clicks
 
@@ -292,8 +294,51 @@ async def connect_or_check(request: Request):
         return {
             "connected": sheets_available,
             "status": "success" if sheets_available else "error",
-            "message": "✅ Google Sheets connected" if sheets_available else "❌ Google Sheets not connected"
+            "message": "✅ Google Sheets connected" if sheets_available else "❌ Google Sheets not connected",
+            "service_account_email": service_account_email
         }
+
+@app.post("/api/sheets/save-credentials")
+async def save_sheets_credentials(request: Request):
+    """Save Google Service Account JSON to settings and initialize gspread"""
+    global gc, sheets_available, service_account_email
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    
+    raw_creds = body.get("credentials") or body.get("service_account_json") or body.get("json") or body.get("google_service_account_json")
+    if not raw_creds:
+        return JSONResponse(status_code=400, content={"status": "error", "message": "No credentials provided."})
+
+    try:
+        if isinstance(raw_creds, dict):
+            creds_dict = raw_creds
+        else:
+            creds_dict = json.loads(str(raw_creds).strip())
+
+        client_email = creds_dict.get("client_email", "")
+        if not client_email:
+            return JSONResponse(status_code=400, content={"status": "error", "message": "Invalid JSON: missing client_email."})
+
+        # Save to settings.json
+        settings = load_settings()
+        settings["google_service_account_json"] = creds_dict
+        save_settings(settings)
+
+        # Initialize gspread
+        creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        gc = gspread.authorize(creds)
+        sheets_available = True
+        service_account_email = client_email
+
+        return {
+            "status": "success",
+            "message": f"✅ Connected Google Sheets service account ({client_email})",
+            "service_account_email": client_email
+        }
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"status": "error", "message": f"Failed to authorize credentials: {str(e)}"})
 
 @app.post("/api/sheets/test-connection")
 async def test_sheet_connection(request: Request):
@@ -570,7 +615,6 @@ async def read_posts(request: Request):
     - Normalizes post fields across all frontend conventions
     - Saves directly to the channel's dynamic Google Sheet
     - Automatic fallback to default sheet if new sheet permissions are pending
-    - Never throws 500 or uncaught errors to the frontend
     """
     raw_body = {}
     try:
@@ -687,150 +731,133 @@ async def read_posts(request: Request):
     elif os.path.exists("scheduler_session.session") or os.path.exists("/app/scheduler_session.session"):
         session_target = "scheduler_session" if os.path.exists("scheduler_session.session") else "/app/scheduler_session"
 
-    if not session_target:
-        return {
-            "status": "success",
-            "count": 0,
-            "total": 0,
-            "message": "⚠️ Telegram session not configured. Please set TELEGRAM_SESSION_STRING in environment variables.",
-            "posts": [],
-            "messages": [],
-            "data": [],
-            "date_range": date_range_resp,
-            "channel": target_username,
-            "target_sheet_id": target_sheet_id,
-            "target_tab": target_tab
-        }
-
     posts_data = []
     all_links = set()
 
-    try:
-        async with TelegramClient(session_target, api_id_int, api_hash_val) as client:
-            # Resolve entity safely to prevent Telethon ValueError
-            try:
-                entity = await client.get_entity(target_username)
-            except Exception:
+    # 1. Try Telethon scraping if session is configured
+    if session_target:
+        try:
+            async with TelegramClient(session_target, api_id_int, api_hash_val) as client:
                 try:
-                    entity = await client.get_entity(f"@{target_username}")
-                except Exception as e_ent:
-                    print(f"⚠️ Could not resolve entity for '{target_username}': {e_ent}")
-                    entity = target_username
+                    entity = await client.get_entity(target_username)
+                except Exception:
+                    try:
+                        entity = await client.get_entity(f"@{target_username}")
+                    except Exception as e_ent:
+                        print(f"⚠️ Could not resolve entity for '{target_username}': {e_ent}")
+                        entity = target_username
 
-            async for msg in client.iter_messages(entity, offset_date=end_time_utc):
-                if msg.date is None:
-                    continue
-                msg_date_utc = msg.date if msg.date.tzinfo == timezone.utc else msg.date.astimezone(timezone.utc)
+                async for msg in client.iter_messages(entity, offset_date=end_time_utc):
+                    if msg.date is None:
+                        continue
+                    msg_date_utc = msg.date if msg.date.tzinfo == timezone.utc else msg.date.astimezone(timezone.utc)
 
-                # 🚀 CRITICAL OPTIMIZATION: Early break when passing target day start!
-                if msg_date_utc < start_time_utc:
-                    break
-                if msg_date_utc > end_time_utc:
-                    continue
+                    if msg_date_utc < start_time_utc:
+                        break
+                    if msg_date_utc > end_time_utc:
+                        continue
 
-                msg_date_ist = msg_date_utc.astimezone(ist)
-                text_content = msg.text or ""
-                links = extract_links(text_content)
-                for l in links:
+                    msg_date_ist = msg_date_utc.astimezone(ist)
+                    text_content = msg.text or ""
+                    links = extract_links(text_content)
+                    for l in links:
+                        all_links.add(l)
+
+                    time_str = msg_date_ist.strftime("%Y-%m-%d %H:%M:%S")
+                    date_str = msg_date_ist.strftime("%Y-%m-%d")
+                    ist_formatted = msg_date_ist.strftime("%d %b %Y, %I:%M %p IST")
+                    views_count = getattr(msg, "views", 0) or 0
+                    snippet = text_content if text_content.strip() else ("📸 Image post" if msg.media else "")
+
+                    posts_data.append({
+                        "id": msg.id,
+                        "post_id": msg.id,
+                        "postNumber": msg.id,
+                        "Post ID": msg.id,
+                        "time": time_str,
+                        "date": date_str,
+                        "date_time": time_str,
+                        "DateTime": time_str,
+                        "Date & Time (IST)": ist_formatted,
+                        "views": views_count,
+                        "Views": views_count,
+                        "text": snippet,
+                        "message": snippet,
+                        "Full_Text": snippet,
+                        "links": links,
+                        "Links": links,
+                        "channel": target_username,
+                        "Channel": target_username,
+                        "category": "",
+                        "status": "Live",
+                        "Status": "Live",
+                        "media_type": "image" if msg.media else "text",
+                        "image": f"images/@{target_username}_{msg.id}.jpg" if msg.media else "",
+                        "telegram_clicks": 0,
+                        "Telegram_clicks": 0,
+                        "Telegram-clicks": 0,
+                        "whatsapp_clicks": 0,
+                        "Whatsapp_clicks": 0,
+                        "Whatsapp-clicks": 0,
+                    })
+        except Exception as e_tg:
+            print(f"⚠️ Telethon client notice: {e_tg}")
+
+    # 2. Seamless live public channel fallback (t.me/s/{target_username})
+    if not posts_data:
+        try:
+            posts_data = scrape_public_channel_posts(
+                channel_username=target_username,
+                start_time_utc=start_time_utc,
+                end_time_utc=end_time_utc
+            )
+            for p in posts_data:
+                for l in p.get("links", []):
                     all_links.add(l)
+        except Exception as e_pub:
+            print(f"⚠️ Public scrape fallback notice: {e_pub}")
 
-                time_str = msg_date_ist.strftime("%Y-%m-%d %H:%M:%S")
-                date_str = msg_date_ist.strftime("%Y-%m-%d")
-                ist_formatted = msg_date_ist.strftime("%d %b %Y, %I:%M %p IST")
-                views_count = getattr(msg, "views", 0) or 0
-                snippet = text_content if text_content.strip() else ("📸 Image post" if msg.media else "")
+    # Fast parallel click fetching (non-blocking)
+    if all_links:
+        try:
+            clicks_map = await get_batch_clicks_data(list(all_links), post_date_str)
+            for p in posts_data:
+                tg = 0
+                wa = 0
+                for l in p.get("links", []):
+                    st = clicks_map.get(l, {})
+                    tg += st.get("telegram_clicks", 0)
+                    wa += st.get("whatsapp_clicks", 0)
+                p["telegram_clicks"] = tg
+                p["Telegram_clicks"] = tg
+                p["Telegram-clicks"] = tg
+                p["whatsapp_clicks"] = wa
+                p["Whatsapp_clicks"] = wa
+                p["Whatsapp-clicks"] = wa
+        except Exception as e_click:
+            print(f"⚠️ Notice: Click data fetch error: {e_click}")
 
-                posts_data.append({
-                    "id": msg.id,
-                    "post_id": msg.id,
-                    "postNumber": msg.id,
-                    "Post ID": msg.id,
-                    "time": time_str,
-                    "date": date_str,
-                    "date_time": time_str,
-                    "DateTime": time_str,
-                    "Date & Time (IST)": ist_formatted,
-                    "views": views_count,
-                    "Views": views_count,
-                    "text": snippet,
-                    "message": snippet,
-                    "Full_Text": snippet,
-                    "links": links,
-                    "Links": links,
-                    "channel": target_username,
-                    "Channel": target_username,
-                    "category": "",
-                    "status": "Live",
-                    "Status": "Live",
-                    "media_type": "image" if msg.media else "text",
-                    "image": f"images/@{target_username}_{msg.id}.jpg" if msg.media else "",
-                    "telegram_clicks": 0,
-                    "Telegram_clicks": 0,
-                    "Telegram-clicks": 0,
-                    "whatsapp_clicks": 0,
-                    "Whatsapp_clicks": 0,
-                    "Whatsapp-clicks": 0,
-                })
-
-        # Fast parallel click fetching (non-blocking)
-        if all_links:
-            try:
-                clicks_map = await get_batch_clicks_data(list(all_links), post_date_str)
-                for p in posts_data:
-                    tg = 0
-                    wa = 0
-                    for l in p.get("links", []):
-                        st = clicks_map.get(l, {})
-                        tg += st.get("telegram_clicks", 0)
-                        wa += st.get("whatsapp_clicks", 0)
-                    p["telegram_clicks"] = tg
-                    p["Telegram_clicks"] = tg
-                    p["Telegram-clicks"] = tg
-                    p["whatsapp_clicks"] = wa
-                    p["Whatsapp_clicks"] = wa
-                    p["Whatsapp-clicks"] = wa
-            except Exception as e_click:
-                print(f"⚠️ Notice: Click data fetch error: {e_click}")
-
-        # Dynamic Google Sheet write with safe fallback
-        save_msg = "Google Sheets sync skipped (0 posts found)"
-        if posts_data:
-            override_id = extract_sheet_id_from_url(sheet_url) if sheet_url else None
-            try:
-                save_msg = save_posts_to_channel_date_sheets(
-                    posts_data=posts_data,
-                    channel_username=target_username,
-                    scheduled=False,
-                    override_sheet_id=override_id,
-                    override_sheet_tab=sheet_tab
-                )
-            except Exception as e_sheet:
-                print(f"⚠️ Error saving to Google Sheets: {e_sheet}")
-                save_msg = f"Posts scraped successfully. Sheets notice: {e_sheet}"
+    # Write ONLY to the sheet link specified by the user
+    target_link_or_id = sheet_url or target_sheet_id
+    save_msg = "Google Sheets sync skipped (0 posts found)"
+    if posts_data:
+        try:
+            save_msg = save_posts_to_channel_date_sheets(
+                posts_data=posts_data,
+                channel_username=target_username,
+                scheduled=False,
+                override_sheet_id=target_link_or_id,
+                override_sheet_tab=sheet_tab
+            )
+        except Exception as e_sheet:
+            print(f"⚠️ Error saving to Google Sheets: {e_sheet}")
+            save_msg = f"Posts scraped successfully. Sheets notice: {e_sheet}"
 
         return {
             "status": "success",
             "count": len(posts_data),
             "total": len(posts_data),
             "message": save_msg,
-            "posts": posts_data,
-            "messages": posts_data,
-            "data": posts_data,
-            "date_range": date_range_resp,
-            "channel": target_username,
-            "target_sheet_id": target_sheet_id,
-            "target_tab": target_tab
-        }
-
-    except Exception as e:
-        print(f"❌ Error in read_posts: {e}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "status": "success",
-            "count": len(posts_data),
-            "total": len(posts_data),
-            "message": f"Notice: {str(e)}",
             "posts": posts_data,
             "messages": posts_data,
             "data": posts_data,

@@ -7,6 +7,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+import urllib.request
 from datetime import datetime, date, timezone, timedelta
 import re
 from typing import Dict, List, Any, Optional, Tuple
@@ -16,6 +17,8 @@ from google.oauth2 import service_account
 import pytz
 
 load_dotenv()
+
+ist = pytz.timezone("Asia/Kolkata")
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -139,14 +142,28 @@ def initialize_google_sheets() -> bool:
     try:
         google_creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
         if not google_creds_json:
+            settings = load_settings()
+            google_creds_json = settings.get("google_service_account_json") or settings.get("service_account_json")
+        if not google_creds_json:
+            for fname in ["service_account.json", "credentials.json", "google_credentials.json", "/app/service_account.json", "app/service_account.json"]:
+                if os.path.exists(fname):
+                    try:
+                        with open(fname, "r", encoding="utf-8") as f:
+                            google_creds_json = f.read()
+                            break
+                    except Exception:
+                        pass
+
+        if not google_creds_json:
             sheets_available = False
             return False
 
-        creds_dict = json.loads(google_creds_json)
+        creds_dict = json.loads(google_creds_json) if isinstance(google_creds_json, str) else google_creds_json
         service_account_email = creds_dict.get("client_email", "")
         creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
         gc = gspread.authorize(creds)
         sheets_available = True
+        print(f"✅ Google Sheets authorized successfully for: {service_account_email}")
         return True
     except Exception as e:
         print(f"❌ Failed to authorize Google Sheets: {e}")
@@ -414,31 +431,31 @@ def save_posts_to_channel_date_sheets(
     if not posts_data:
         return "No posts to write."
 
-    # 1. Determine Target Channel Spreadsheet ID
-    target_sheet_id = override_sheet_id
-    if not target_sheet_id:
+    # 1. Determine Target Channel Spreadsheet Link / ID
+    target_sheet_input = override_sheet_id
+    if not target_sheet_input:
         dyn_id, _ = get_channel_sheet_target(channel_username)
-        target_sheet_id = dyn_id or DEFAULT_SHEET_ID
+        target_sheet_input = dyn_id or DEFAULT_SHEET_ID
 
-    target_sheet_id = str(target_sheet_id or DEFAULT_SHEET_ID).strip()
+    target_sheet_input = str(target_sheet_input or DEFAULT_SHEET_ID).strip()
+    clean_target_id = extract_sheet_id_from_url(target_sheet_input)
 
-    # 2. Open Target Channel Sheet; Fallback to Default if needed
+    # 2. Open Target Channel Sheet directly (Write ONLY to the given sheet link)
     workbook = None
-    used_fallback = False
-
     try:
-        workbook = gc.open_by_key(target_sheet_id)
+        if target_sheet_input.startswith("http"):
+            try:
+                workbook = gc.open_by_url(target_sheet_input)
+            except Exception:
+                workbook = gc.open_by_key(clean_target_id)
+        else:
+            workbook = gc.open_by_key(clean_target_id)
     except Exception as e:
-        print(f"⚠️ Could not open sheet '{target_sheet_id}': {e}. Falling back to default '{DEFAULT_SHEET_ID}'...")
-        try:
-            workbook = gc.open_by_key(DEFAULT_SHEET_ID)
-            used_fallback = True
-            target_sheet_id = DEFAULT_SHEET_ID
-        except Exception as e2:
-            return f"Notice: Could not access Google Sheets ({e2}). Ensure sheet is shared with: {service_account_email}"
+        help_email = f" Please ensure the spreadsheet is shared with Editor permission with: {service_account_email}" if service_account_email else ""
+        return f"❌ Could not access your specified sheet link ({target_sheet_input}): {e}.{help_email}"
 
     if not workbook:
-        return "Notice: Google Sheets not accessible"
+        return f"❌ Could not open target sheet ({target_sheet_input})"
 
     # 3. Group all scraped posts by their individual IST calendar date
     posts_by_date: Dict[date, List[Dict[str, Any]]] = {}
@@ -487,8 +504,8 @@ def save_posts_to_channel_date_sheets(
             for post in day_posts:
                 time_val = str(post.get("time") or post.get("date_time") or post.get("date") or "")
                 views_val = post.get("views") or post.get("Views") or 0
-                tg_clicks = post.get("Telegram-clicks") or post.get("telegram_clicks") or post.get("Telegram_clicks") or 0
-                wa_clicks = post.get("Whatsapp-clicks") or post.get("whatsapp_clicks") or post.get("Whatsapp_clicks") or 0
+                tg_clicks = post.get("telegram_clicks") or post.get("Telegram_clicks") or post.get("Telegram-clicks") or 0
+                wa_clicks = post.get("whatsapp_clicks") or post.get("Whatsapp_clicks") or post.get("Whatsapp-clicks") or 0
                 links_list = post.get("links") or post.get("Links") or []
                 links_val = ", ".join(links_list) if isinstance(links_list, list) else str(links_list)
                 text_val = str(post.get("text") or post.get("message") or post.get("Full_Text") or "").replace("\n", " ").strip()[:500]
@@ -527,8 +544,7 @@ def save_posts_to_channel_date_sheets(
             print(f"❌ Error syncing date subsheet for date {d}: {e_day}")
             synced_summary.append(f"{get_date_tab_title(d)} (notice: {e_day})")
 
-    fallback_note = " (Fallback default sheet used - share new sheet with editor rights)" if used_fallback else ""
-    return f"✅ Synced {len(posts_data)} posts into {len(synced_summary)} daily subsheets in Google Sheet: {', '.join(synced_summary)}{fallback_note}"
+    return f"✅ Synced {len(posts_data)} posts into {len(synced_summary)} daily subsheets in specified sheet '{workbook.title}': {', '.join(synced_summary)}"
 
 async def send_telegram_message(
     image_path: Optional[str],
@@ -558,3 +574,155 @@ async def send_telegram_message(
                 message=post_text[:4096],
                 schedule_date=schedule_time
             )
+
+def scrape_public_channel_posts(
+    channel_username: str,
+    start_time_utc: datetime,
+    end_time_utc: datetime,
+    max_pages: int = 4
+) -> List[Dict[str, Any]]:
+    """
+    Scrapes real public posts from https://t.me/s/{channel_username}
+    Extracts post ID, IST timestamp, views, links, text.
+    Handles date range filtering accurately.
+    """
+    clean_channel = channel_username.replace("@", "").strip()
+    posts_data = []
+    seen_ids = set()
+
+    current_url = f"https://t.me/s/{clean_channel}"
+    page = 0
+
+    while current_url and page < max_pages:
+        page += 1
+        try:
+            req = urllib.request.Request(
+                current_url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            )
+            html = urllib.request.urlopen(req, timeout=10).read().decode("utf-8")
+        except Exception as e:
+            print(f"⚠️ Error fetching t.me/s/{clean_channel}: {e}")
+            break
+
+        matches = list(re.finditer(
+            r"<div class=\"tgme_widget_message text_not_supported_wrap js-widget_message\"[^>]*data-post=\"([^\"]+)\"(.*?)(?=<div class=\"tgme_widget_message text_not_supported_wrap|\Z)",
+            html,
+            re.DOTALL
+        ))
+        if not matches:
+            break
+
+        reached_earlier = False
+        earliest_id = None
+
+        for m in reversed(matches):
+            post_full_id = m.group(1)
+            pid_str = post_full_id.split("/")[-1]
+            try:
+                pid = int(pid_str)
+            except Exception:
+                pid = pid_str
+
+            if pid_str in seen_ids:
+                continue
+            seen_ids.add(pid_str)
+
+            body = m.group(2)
+            t_m = re.search(r"<time[^>]*datetime=\"([^\"]+)\"", body)
+            v_m = re.search(r"<span class=\"tgme_widget_message_views\">([^<]+)</span>", body)
+            txt_m = re.search(r"<div class=\"tgme_widget_message_text[^\"]*\"[^>]*>(.*?)</div>\s*<div class=\"tgme_widget_message_footer", body, re.DOTALL)
+
+            if not t_m:
+                continue
+
+            dt_iso = t_m.group(1)
+            try:
+                dt_utc = datetime.fromisoformat(dt_iso.replace("Z", "+00:00"))
+            except Exception:
+                continue
+
+            if dt_utc > end_time_utc:
+                continue
+            if dt_utc < start_time_utc:
+                reached_earlier = True
+                continue
+
+            dt_ist = dt_utc.astimezone(ist)
+            time_str = dt_ist.strftime("%Y-%m-%d %H:%M:%S")
+            date_str = dt_ist.strftime("%Y-%m-%d")
+            ist_formatted = dt_ist.strftime("%d %b %Y, %I:%M %p IST")
+
+            # Parse views (e.g. 1.2K -> 1200)
+            views_raw = v_m.group(1).strip() if v_m else "0"
+            views_val = 0
+            if "k" in views_raw.lower():
+                try:
+                    views_val = int(float(views_raw.lower().replace("k", "")) * 1000)
+                except Exception:
+                    views_val = 0
+            elif "m" in views_raw.lower():
+                try:
+                    views_val = int(float(views_raw.lower().replace("m", "")) * 1000000)
+                except Exception:
+                    views_val = 0
+            else:
+                try:
+                    views_val = int(views_raw.replace(",", ""))
+                except Exception:
+                    views_val = 0
+
+            raw_txt = txt_m.group(1) if txt_m else ""
+            clean_txt = re.sub(r"<br\s*/?>", " ", raw_txt)
+            clean_txt = re.sub(r"<[^>]+>", " ", clean_txt).strip()
+            links = extract_links(clean_txt)
+
+            snippet = clean_txt if clean_txt else "📸 Image post"
+
+            posts_data.append({
+                "id": pid,
+                "post_id": pid,
+                "postNumber": pid,
+                "Post ID": pid,
+                "time": time_str,
+                "date": date_str,
+                "date_time": time_str,
+                "DateTime": time_str,
+                "Date & Time (IST)": ist_formatted,
+                "views": views_val,
+                "Views": views_val,
+                "text": snippet,
+                "message": snippet,
+                "Full_Text": snippet,
+                "links": links,
+                "Links": links,
+                "channel": clean_channel,
+                "Channel": clean_channel,
+                "category": "",
+                "status": "Live",
+                "Status": "Live",
+                "media_type": "image" if ("tgme_widget_message_photo" in body or "tgme_widget_message_video" in body) else "text",
+                "image": "",
+                "telegram_clicks": 0,
+                "Telegram_clicks": 0,
+                "Telegram-clicks": 0,
+                "whatsapp_clicks": 0,
+                "Whatsapp_clicks": 0,
+                "Whatsapp-clicks": 0,
+            })
+
+            if earliest_id is None or (isinstance(pid, int) and pid < earliest_id):
+                if isinstance(pid, int):
+                    earliest_id = pid
+
+        if reached_earlier or not earliest_id:
+            break
+
+        prev_link = re.search(r"<link\s+rel=\"prev\"\s+href=\"([^\"]+)\"", html)
+        if prev_link:
+            current_url = f"https://t.me{prev_link.group(1)}"
+        else:
+            current_url = f"https://t.me/s/{clean_channel}?before={earliest_id}"
+
+    posts_data.sort(key=lambda p: str(p.get("time", "")))
+    return posts_data

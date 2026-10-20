@@ -15,6 +15,7 @@ import * as XLSX from 'xlsx';
 import { CHANNELS } from '../services/channels';
 import { StorageService } from '../services/storage';
 import { AppSettings, ChannelSheetConfig, PostLogItem } from '../types';
+import { authenticatedFetch } from '../services/apiClient';
 
 interface LogsSheetsTabProps {
   settings: AppSettings;
@@ -51,7 +52,7 @@ export const LogsSheetsTab: React.FC<LogsSheetsTabProps> = ({
   useEffect(() => {
     const fetchBackendConfig = async () => {
       try {
-        const res = await fetch('/api/sheets/config');
+        const res = await authenticatedFetch('/api/sheets/config');
         if (res.ok) {
           const data = await res.json();
           if (data.service_account_email) {
@@ -107,7 +108,7 @@ export const LogsSheetsTab: React.FC<LogsSheetsTabProps> = ({
     onUpdateSettings(updated);
 
     try {
-      const res = await fetch('/api/sheets/update-config', {
+      const res = await authenticatedFetch('/api/sheets/update-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -142,7 +143,7 @@ export const LogsSheetsTab: React.FC<LogsSheetsTabProps> = ({
     onUpdateSettings(updated);
 
     try {
-      await fetch('/api/settings/auto-fetch', {
+      await authenticatedFetch('/api/settings/auto-fetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
@@ -163,7 +164,7 @@ export const LogsSheetsTab: React.FC<LogsSheetsTabProps> = ({
 
     try {
       const urlToTest = targetUrl || Object.values(channelSheets)[0]?.sheet_url || '';
-      const res = await fetch('/api/sheets/test-connection', {
+      const res = await authenticatedFetch('/api/sheets/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sheet_url: urlToTest }),

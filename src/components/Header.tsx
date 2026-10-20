@@ -1,14 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { Send, Clock, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Send, Clock, CheckCircle2, AlertCircle, RefreshCw, LogOut } from 'lucide-react';
+import { UserButton } from '@clerk/clerk-react';
 import { AppSettings } from '../types';
 
 interface HeaderProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   settings: AppSettings;
+  userEmail?: string;
+  userRole?: string;
+  clerkActive?: boolean;
+  onSignOut?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, settings }) => {
+export const Header: React.FC<HeaderProps> = ({
+  activeTab,
+  setActiveTab,
+  settings,
+  userEmail,
+  userRole = 'Admin',
+  clerkActive = true,
+  onSignOut,
+}) => {
   const [istTime, setIstTime] = useState<string>('');
 
   useEffect(() => {
@@ -59,7 +72,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, setting
           </div>
 
           {/* Center Info: Live IST Clock & Status */}
-          <div className="hidden md:flex items-center gap-5 text-xs text-slate-300">
+          <div className="hidden lg:flex items-center gap-5 text-xs text-slate-300">
             <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-800/80 rounded-full border border-slate-700/60 font-mono">
               <Clock className="w-3.5 h-3.5 text-blue-400" />
               <span>{istTime || 'Loading IST...'}</span>
@@ -82,6 +95,45 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, setting
                 <span className="text-emerald-400 font-medium">Synced</span>
               </div>
             </div>
+          </div>
+
+          {/* User Profile & Auth Status */}
+          <div className="flex items-center gap-3">
+            {userEmail && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/80 rounded-xl border border-slate-700/80 text-xs">
+                <div className="flex flex-col text-right hidden sm:block">
+                  <span className="text-[11px] font-medium text-slate-200 truncate max-w-[150px]">
+                    {userEmail}
+                  </span>
+                  <span className="text-[10px] text-emerald-400 font-semibold tracking-wide">
+                    {userRole}
+                  </span>
+                </div>
+                <span className="px-2 py-0.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] rounded-full font-bold uppercase sm:hidden">
+                  {userRole}
+                </span>
+                {clerkActive ? (
+                  <UserButton
+                    afterSignOutUrl="/"
+                    appearance={{
+                      elements: {
+                        avatarBox: 'w-7 h-7 border border-slate-600',
+                      },
+                    }}
+                  />
+                ) : (
+                  onSignOut && (
+                    <button
+                      onClick={onSignOut}
+                      title="Sign Out"
+                      className="text-slate-400 hover:text-white p-1 hover:bg-slate-700/50 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4" />
+                    </button>
+                  )
+                )}
+              </div>
+            )}
           </div>
         </div>
 

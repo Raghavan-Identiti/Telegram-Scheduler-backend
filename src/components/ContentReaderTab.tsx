@@ -22,6 +22,7 @@ import {
 import * as XLSX from 'xlsx';
 import { CHANNELS } from '../services/channels';
 import { AppSettings } from '../types';
+import { authenticatedFetch } from '../services/apiClient';
 
 interface ContentReaderTabProps {
   settings: AppSettings;
@@ -238,7 +239,7 @@ export const ContentReaderTab: React.FC<ContentReaderTabProps> = ({
         payload.sheet_url = customSheetUrl.trim();
       }
 
-      const response = await fetch('/api/read-posts', {
+      const response = await authenticatedFetch('/api/read-posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

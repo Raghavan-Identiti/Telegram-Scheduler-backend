@@ -24,6 +24,7 @@ from app.routers.whatsapp_routes import router as whatsapp_router
 from app.services.whatsapp_worker import start_worker, stop_worker
 from app.core.scheduler import scheduler
 from apscheduler.triggers.cron import CronTrigger
+from app.core.clerk_auth import verify_clerk_token, is_email_authorized, PRIMARY_ADMIN_EMAIL
 
 from app.services.telegram_utils import (
     CHANNELS,
@@ -84,6 +85,59 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"status": "error", "error": str(exc), "path": str(request.url.path)},
         headers=headers
     )
+
+# =========================================================================
+# Clerk Authentication Middleware for Protected API Endpoints
+# =========================================================================
+@app.middleware("http")
+async def clerk_auth_middleware(request: Request, call_next):
+    # Allow preflight CORS requests immediately
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    path = request.url.path
+
+    # Protect all /api/ endpoints, except public health endpoints
+    is_protected_api = path.startswith("/api/") and path not in (
+        "/api/health",
+        "/api/ping",
+        "/api/docs",
+        "/api/openapi.json"
+    )
+
+    if is_protected_api:
+        try:
+            user_info = await verify_clerk_token(request)
+            request.state.user = user_info
+        except HTTPException as he:
+            origin = request.headers.get("origin") or "*"
+            headers = {
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+            return JSONResponse(
+                status_code=he.status_code,
+                content={"status": "error", "error": he.detail, "path": path},
+                headers=headers
+            )
+        except Exception as e:
+            origin = request.headers.get("origin") or "*"
+            headers = {
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+            return JSONResponse(
+                status_code=401,
+                content={"status": "error", "error": f"Authentication validation failed: {str(e)}", "path": path},
+                headers=headers
+            )
+
+    response = await call_next(request)
+    return response
 
 if os.path.exists("uploads"):
     app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -154,8 +208,25 @@ def to_utc_naive(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 @app.get("/")
+@app.get("/api/health")
 async def root():
-    return {"status": "success", "message": "TeleQueue API is running!"}
+    return {
+        "status": "success",
+        "message": "TeleQueue API is running with Clerk Protection!",
+        "auth_provider": "clerk",
+        "primary_admin": PRIMARY_ADMIN_EMAIL
+    }
+
+@app.get("/api/auth/me")
+async def get_authenticated_user_identity(request: Request):
+    """Returns the verified user context from the active Clerk session."""
+    user = getattr(request.state, "user", None)
+    if not user:
+        user = await verify_clerk_token(request)
+    return {
+        "status": "success",
+        "user": user
+    }
 
 # =========================================================================
 # 1. Dynamic Google Sheets Config Endpoints

@@ -21,6 +21,8 @@ from dateutil import parser
 from app.routers.logs_api import router as logs_router
 from app.routers.recurrence_scheduler import router as recurrence_router
 from app.routers.whatsapp_routes import router as whatsapp_router
+from app.routers.calendar_routes import router as calendar_router
+from app.services.calendar_store import save_calendar_event, init_calendar_db
 from app.services.whatsapp_worker import start_worker, stop_worker
 from app.core.scheduler import scheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -147,6 +149,7 @@ if os.path.exists("logs"):
 app.include_router(logs_router, prefix="/api")
 app.include_router(recurrence_router, prefix="/api")
 app.include_router(whatsapp_router)
+app.include_router(calendar_router)
 
 def get_telethon_creds():
     raw_id = (
@@ -1141,36 +1144,8 @@ async def read_scheduled_messages(request: Request):
         }
 
 # =========================================================================
-# 5. Auto-Scheduler & Calendar Slots
+# 5. Auto-Scheduler & Calendar Operations (Calendar routes mounted via calendar_router)
 # =========================================================================
-
-@app.get("/api/calendar-slots")
-def get_calendar_slots(date: str = Query(..., description="Format: YYYY-MM-DD")):
-    log_file = os.path.join("logs", "post_logs.xlsx")
-    if not os.path.exists(log_file):
-        return []
-
-    try:
-        df = pd.read_excel(log_file)
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.date
-        df['Time'] = pd.to_datetime(df['Time'], format='%H:%M:%S', errors='coerce').dt.time
-
-        selected_date = datetime.strptime(date, "%Y-%m-%d").date()
-        day_posts = df[df['Date'] == selected_date]
-
-        slots = []
-        for _, row in day_posts.iterrows():
-            if pd.isna(row['Time']):
-                continue
-            full_datetime = datetime.combine(row['Date'], row['Time'])
-            slots.append({
-                "time": full_datetime.isoformat(),
-                "status": "booked",
-                "post": row.get('Post Number', '')
-            })
-        return slots
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.post("/api/auto-schedule")
 async def auto_schedule(
@@ -1348,6 +1323,27 @@ async def auto_schedule(
                     "channel": f"@{channel_username}"
                 })
 
+                try:
+                    save_calendar_event({
+                        "id": f"post_auto_{channel_username}_{post_num}_{int(datetime.now().timestamp())}",
+                        "post_number": str(post_num),
+                        "channel": channel_username,
+                        "channel_name": CHANNELS.get(channel_id, {}).get("sheet_name", channel_username),
+                        "channel_type": "telegram",
+                        "title": f"Post #{post_num} (@{channel_username})",
+                        "text": post_text or "",
+                        "category": category or "Auto Scheduled",
+                        "scheduled_time": scheduled_time.isoformat(),
+                        "date": scheduled_time.strftime("%Y-%m-%d"),
+                        "time": scheduled_time.strftime("%H:%M"),
+                        "status": status,
+                        "image_name": os.path.basename(image_path) if image_path else None,
+                        "links": extract_links(post_text) if post_text else [],
+                        "source": "auto_schedule"
+                    })
+                except Exception as e_cal:
+                    print(f"⚠️ Calendar store save error: {e_cal}")
+
         return JSONResponse({
             "status": f"Scheduled {total_scheduled} posts across {len(selected_channels)} channels",
             "posts": all_results,
@@ -1410,6 +1406,26 @@ async def bulk_schedule(background_tasks: BackgroundTasks, files: List[UploadFil
                 schedule_time=schedule_time
             )
             scheduled_count += 1
+
+            try:
+                save_calendar_event({
+                    "id": f"post_bulk_{post_num}_{int(datetime.now().timestamp())}",
+                    "post_number": str(post_num),
+                    "channel": "amazonindiaassociates",
+                    "channel_name": "Amazon India Associates",
+                    "channel_type": "telegram",
+                    "title": f"Bulk Post #{post_num}",
+                    "text": post_text or "",
+                    "category": category or "Bulk",
+                    "scheduled_time": schedule_time.isoformat(),
+                    "date": schedule_time.strftime("%Y-%m-%d"),
+                    "time": schedule_time.strftime("%H:%M"),
+                    "status": "scheduled",
+                    "image_name": os.path.basename(image_files.get(post_num)) if image_files.get(post_num) else None,
+                    "source": "bulk_schedule"
+                })
+            except Exception as e_cal:
+                print(f"⚠️ Bulk schedule calendar save error: {e_cal}")
 
         return JSONResponse({"status": f"{scheduled_count} posts scheduled successfully"})
     except Exception as e:
@@ -1490,6 +1506,7 @@ async def auto_fetch_yesterday_posts():
 
 @app.on_event("startup")
 async def startup_event():
+    init_calendar_db()
     start_worker()
     scheduler.start()
     update_scheduler_job()

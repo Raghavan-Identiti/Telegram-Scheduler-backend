@@ -15,6 +15,7 @@ import { WhatsAppSchedulerTab } from './components/WhatsAppSchedulerTab';
 import { AnalyticsTab } from './components/AnalyticsTab';
 import { LogsSheetsTab } from './components/LogsSheetsTab';
 import { ContentReaderTab } from './components/ContentReaderTab';
+import { ScheduleCalendarTab } from './components/ScheduleCalendarTab';
 import { AccessDenied } from './components/AccessDenied';
 import { ClerkSetupGuide } from './components/ClerkSetupGuide';
 import { StorageService } from './services/storage';
@@ -69,6 +70,9 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {activeTab === 'calendar' && (
+          <ScheduleCalendarTab onNotify={showToast} />
+        )}
         {activeTab === 'content-reader' && (
           <ContentReaderTab
             settings={settings}

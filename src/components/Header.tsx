@@ -43,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   const navItems = [
+    { id: 'calendar', label: 'Schedule Calendar', badge: 'Live' },
     { id: 'content-reader', label: 'Content Reader', badge: '⚡ ~2s' },
     { id: 'auto-schedule', label: 'Auto Scheduler', badge: null },
     { id: 'recurring', label: 'Recurring Schedules', badge: null },

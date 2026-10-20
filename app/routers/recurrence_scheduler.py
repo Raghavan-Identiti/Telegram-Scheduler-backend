@@ -9,6 +9,7 @@ import os
 import re
 import json
 from app.services.telegram_utils import send_telegram_message, CHANNELS, get_blocked_times_from_sheet
+from app.services.calendar_store import save_calendar_event
 
 router = APIRouter()
 ist = pytz.timezone("Asia/Kolkata")
@@ -221,6 +222,26 @@ async def create_recurring_schedule_from_files(
                     channel_id=channel_id
                 )
                 total_scheduled += 1
+                try:
+                    save_calendar_event({
+                        "id": f"post_rec_{schedule_id}_{channel_username}_{idx}",
+                        "post_number": f"{idx + 1}",
+                        "channel": channel_username,
+                        "channel_name": CHANNELS.get(channel_id, {}).get("sheet_name", channel_username),
+                        "channel_type": "telegram",
+                        "title": f"Recurring #{idx + 1} (@{channel_username})",
+                        "text": template_text or "",
+                        "category": template_category or "Recurring",
+                        "scheduled_time": st.isoformat(),
+                        "date": st.strftime("%Y-%m-%d"),
+                        "time": st.strftime("%H:%M"),
+                        "status": "scheduled",
+                        "image_name": os.path.basename(template_image) if template_image else None,
+                        "source": "recurring_scheduler"
+                    })
+                except Exception as e_cal:
+                    print(f"⚠️ Recurring calendar save error: {e_cal}")
+
                 if len(next_executions) < 10:
                     next_executions.append({
                         "channel": f"@{channel_username}",
